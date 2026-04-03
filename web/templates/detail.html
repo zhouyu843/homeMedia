@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Asset.OriginalFilename}} - HomeMedia</title>
+    <style>
+        body { font-family: sans-serif; margin: 2rem auto; max-width: 720px; padding: 0 1rem; }
+        dl { display: grid; grid-template-columns: 10rem 1fr; gap: 0.75rem 1rem; }
+        dt { font-weight: 600; }
+    </style>
+</head>
+<body>
+    <p><a href="/media">返回列表</a></p>
+    <h1>{{.Asset.OriginalFilename}}</h1>
+    <dl>
+        <dt>ID</dt><dd>{{.Asset.ID}}</dd>
+        <dt>媒体类型</dt><dd>{{.Asset.MediaType}}</dd>
+        <dt>MIME</dt><dd>{{.Asset.MIMEType}}</dd>
+        <dt>大小</dt><dd>{{.Asset.SizeBytes}}</dd>
+        <dt>存储路径</dt><dd>{{.Asset.StoragePath}}</dd>
+        <dt>上传时间</dt><dd>{{.Asset.CreatedAt.Format "2006-01-02 15:04:05"}}</dd>
+    </dl>
+    <p><a href="/media/{{.Asset.ID}}/download">下载原文件</a></p>
+</body>
+</html>

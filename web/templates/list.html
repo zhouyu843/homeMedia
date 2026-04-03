@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeMedia</title>
+    <style>
+        body { font-family: sans-serif; margin: 2rem auto; max-width: 960px; padding: 0 1rem; }
+        form, table { margin-top: 1.5rem; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border-bottom: 1px solid #ddd; padding: 0.75rem; text-align: left; }
+        .muted { color: #666; }
+    </style>
+</head>
+<body>
+    <h1>HomeMedia</h1>
+    <p class="muted">最小私有照片和视频库 MVP</p>
+
+    <form action="/uploads" method="post" enctype="multipart/form-data">
+        <label for="file">上传图片或视频</label>
+        <input id="file" name="file" type="file" required>
+        <button type="submit">上传</button>
+    </form>
+
+    <table>
+        <thead>
+            <tr>
+                <th>文件名</th>
+                <th>类型</th>
+                <th>大小</th>
+                <th>上传时间</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{if .Assets}}
+                {{range .Assets}}
+                <tr>
+                    <td><a href="/media/{{.ID}}">{{.OriginalFilename}}</a></td>
+                    <td>{{.MediaType}}</td>
+                    <td>{{.SizeBytes}}</td>
+                    <td>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+                </tr>
+                {{end}}
+            {{else}}
+                <tr>
+                    <td colspan="4">还没有上传任何媒体。</td>
+                </tr>
+            {{end}}
+        </tbody>
+    </table>
+</body>
+</html>
