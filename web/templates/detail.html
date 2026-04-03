@@ -8,11 +8,23 @@
         body { font-family: sans-serif; margin: 2rem auto; max-width: 720px; padding: 0 1rem; }
         dl { display: grid; grid-template-columns: 10rem 1fr; gap: 0.75rem 1rem; }
         dt { font-weight: 600; }
+        .preview { margin: 1.25rem 0 1.75rem; }
+        .preview img, .preview video { width: 100%; max-height: 70vh; border-radius: 0.5rem; background: #111; object-fit: contain; }
     </style>
 </head>
 <body>
     <p><a href="/media">返回列表</a></p>
     <h1>{{.Asset.OriginalFilename}}</h1>
+    <div class="preview">
+        {{if eq .Asset.MediaType "image"}}
+        <img src="/media/{{.Asset.ID}}/view" alt="{{.Asset.OriginalFilename}}">
+        {{else if eq .Asset.MediaType "video"}}
+        <video controls preload="metadata">
+            <source src="/media/{{.Asset.ID}}/view" type="{{.Asset.MIMEType}}">
+            当前浏览器不支持视频播放。
+        </video>
+        {{end}}
+    </div>
     <dl>
         <dt>ID</dt><dd>{{.Asset.ID}}</dd>
         <dt>媒体类型</dt><dd>{{.Asset.MediaType}}</dd>

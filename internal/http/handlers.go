@@ -105,6 +105,19 @@ func (h Handler) DownloadMedia(c *gin.Context) {
 	http.ServeContent(c.Writer, c.Request, asset.OriginalFilename, asset.CreatedAt, file)
 }
 
+func (h Handler) ViewMedia(c *gin.Context) {
+	asset, file, err := h.service.Download(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.writeMediaError(c, err)
+		return
+	}
+	defer file.Close()
+
+	c.Header("Content-Type", asset.MIMEType)
+	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%s", strconv.Quote(asset.OriginalFilename)))
+	http.ServeContent(c.Writer, c.Request, asset.OriginalFilename, asset.CreatedAt, file)
+}
+
 func (h Handler) uploadFromHeader(c *gin.Context, fileHeader *multipart.FileHeader) (media.Asset, error) {
 	file, err := fileHeader.Open()
 	if err != nil {

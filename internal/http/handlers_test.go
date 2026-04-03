@@ -58,8 +58,23 @@ func TestUploadListDetailAndDownloadFlow(t *testing.T) {
 	if detailResp.Code != http.StatusOK {
 		t.Fatalf("expected detail status 200, got %d", detailResp.Code)
 	}
-	if !strings.Contains(detailResp.Body.String(), assetID) {
-		t.Fatalf("expected detail page to contain asset id, got %q", detailResp.Body.String())
+	if !strings.Contains(detailResp.Body.String(), "/media/"+assetID+"/view") {
+		t.Fatalf("expected detail page to contain preview url, got %q", detailResp.Body.String())
+	}
+
+	viewResp := httptest.NewRecorder()
+	router.ServeHTTP(viewResp, httptest.NewRequest(http.MethodGet, "/media/"+assetID+"/view", nil))
+	if viewResp.Code != http.StatusOK {
+		t.Fatalf("expected view status 200, got %d", viewResp.Code)
+	}
+	if got := viewResp.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("expected view content type image/jpeg, got %q", got)
+	}
+	if got := viewResp.Header().Get("Content-Disposition"); !strings.Contains(got, "inline") {
+		t.Fatalf("expected inline content disposition, got %q", got)
+	}
+	if !bytes.Contains(viewResp.Body.Bytes(), []byte{0xff, 0xd8, 0xff}) {
+		t.Fatalf("expected view body to contain stored bytes")
 	}
 
 	downloadResp := httptest.NewRecorder()
@@ -124,9 +139,36 @@ func TestDownloadMissingFileReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestViewMissingFileReturnsNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{
+		assets: []media.Asset{{
+			ID:               "asset-1",
+			OriginalFilename: "missing.jpg",
+			StoredFilename:   "missing.jpg",
+			MediaType:        media.MediaTypeImage,
+			MIMEType:         "image/jpeg",
+			SizeBytes:        10,
+			StoragePath:      "20260403/missing.jpg",
+			CreatedAt:        time.Now().UTC(),
+		}},
+	}
+	service := media.NewService(repo, brokenStore{})
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024)
+	router := NewRouter(handler)
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/media/asset-1/view", nil))
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", resp.Code)
+	}
+}
+
 func testTemplates(t *testing.T) *template.Template {
 	t.Helper()
-	return template.Must(template.New("list.html").Parse(`{{define "list.html"}}{{range .Assets}}{{.OriginalFilename}}{{end}}{{end}}{{define "detail.html"}}{{.Asset.ID}}{{end}}`))
+	return template.Must(template.New("list.html").Parse(`{{define "list.html"}}{{range .Assets}}{{.OriginalFilename}}{{end}}{{end}}{{define "detail.html"}}{{if eq .Asset.MediaType "image"}}<img src="/media/{{.Asset.ID}}/view" alt="{{.Asset.OriginalFilename}}">{{end}}{{if eq .Asset.MediaType "video"}}<video controls><source src="/media/{{.Asset.ID}}/view" type="{{.Asset.MIMEType}}"></video>{{end}}<a href="/media/{{.Asset.ID}}/download">download</a>{{end}}`))
 }
 
 func newUploadRequest(t *testing.T, fieldName string, filename string, content []byte) *http.Request {
