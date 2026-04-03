@@ -14,6 +14,10 @@
 </head>
 <body>
     <p><a href="/media">返回列表</a></p>
+    <form action="/logout" method="post">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button type="submit">退出登录</button>
+    </form>
     <h1>{{.Asset.OriginalFilename}}</h1>
     <div class="preview">
         {{if eq .Asset.MediaType "image"}}
@@ -30,7 +34,6 @@
         <dt>媒体类型</dt><dd>{{.Asset.MediaType}}</dd>
         <dt>MIME</dt><dd>{{.Asset.MIMEType}}</dd>
         <dt>大小</dt><dd>{{.Asset.SizeBytes}}</dd>
-        <dt>存储路径</dt><dd>{{.Asset.StoragePath}}</dd>
         <dt>上传时间</dt><dd>{{.Asset.CreatedAt.Format "2006-01-02 15:04:05"}}</dd>
     </dl>
     <p><a href="/media/{{.Asset.ID}}/download">下载原文件</a></p>

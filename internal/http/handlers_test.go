@@ -8,7 +8,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -29,10 +31,13 @@ func TestUploadListDetailAndDownloadFlow(t *testing.T) {
 	}
 
 	service := media.NewService(repo, store)
-	handler := NewHandler(service, testTemplates(t), 10*1024*1024)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
 	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	uploadCSRFToken := getPageCSRFToken(t, router, "/media", sessionCookie)
 
-	uploadReq := newUploadRequest(t, "file", "photo.jpg", []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00})
+	uploadReq := newUploadRequest(t, "file", "photo.jpg", []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}, map[string]string{"csrf_token": uploadCSRFToken})
+	uploadReq.AddCookie(sessionCookie)
 	uploadResp := httptest.NewRecorder()
 	router.ServeHTTP(uploadResp, uploadReq)
 	if uploadResp.Code != http.StatusSeeOther {
@@ -40,7 +45,9 @@ func TestUploadListDetailAndDownloadFlow(t *testing.T) {
 	}
 
 	listResp := httptest.NewRecorder()
-	router.ServeHTTP(listResp, httptest.NewRequest(http.MethodGet, "/media", nil))
+	listReq := httptest.NewRequest(http.MethodGet, "/media", nil)
+	listReq.AddCookie(sessionCookie)
+	router.ServeHTTP(listResp, listReq)
 	if listResp.Code != http.StatusOK {
 		t.Fatalf("expected list status 200, got %d", listResp.Code)
 	}
@@ -54,7 +61,9 @@ func TestUploadListDetailAndDownloadFlow(t *testing.T) {
 	assetID := repo.assets[0].ID
 
 	detailResp := httptest.NewRecorder()
-	router.ServeHTTP(detailResp, httptest.NewRequest(http.MethodGet, "/media/"+assetID, nil))
+	detailReq := httptest.NewRequest(http.MethodGet, "/media/"+assetID, nil)
+	detailReq.AddCookie(sessionCookie)
+	router.ServeHTTP(detailResp, detailReq)
 	if detailResp.Code != http.StatusOK {
 		t.Fatalf("expected detail status 200, got %d", detailResp.Code)
 	}
@@ -63,7 +72,9 @@ func TestUploadListDetailAndDownloadFlow(t *testing.T) {
 	}
 
 	viewResp := httptest.NewRecorder()
-	router.ServeHTTP(viewResp, httptest.NewRequest(http.MethodGet, "/media/"+assetID+"/view", nil))
+	viewReq := httptest.NewRequest(http.MethodGet, "/media/"+assetID+"/view", nil)
+	viewReq.AddCookie(sessionCookie)
+	router.ServeHTTP(viewResp, viewReq)
 	if viewResp.Code != http.StatusOK {
 		t.Fatalf("expected view status 200, got %d", viewResp.Code)
 	}
@@ -78,7 +89,9 @@ func TestUploadListDetailAndDownloadFlow(t *testing.T) {
 	}
 
 	downloadResp := httptest.NewRecorder()
-	router.ServeHTTP(downloadResp, httptest.NewRequest(http.MethodGet, "/media/"+assetID+"/download", nil))
+	downloadReq := httptest.NewRequest(http.MethodGet, "/media/"+assetID+"/download", nil)
+	downloadReq.AddCookie(sessionCookie)
+	router.ServeHTTP(downloadResp, downloadReq)
 	if downloadResp.Code != http.StatusOK {
 		t.Fatalf("expected download status 200, got %d", downloadResp.Code)
 	}
@@ -100,10 +113,13 @@ func TestUploadRejectsInvalidFileType(t *testing.T) {
 	}
 
 	service := media.NewService(repo, store)
-	handler := NewHandler(service, testTemplates(t), 10*1024*1024)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
 	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	csrfToken := getPageCSRFToken(t, router, "/media", sessionCookie)
 
-	req := newUploadRequest(t, "file", "notes.txt", []byte("plain text"))
+	req := newUploadRequest(t, "file", "notes.txt", []byte("plain text"), map[string]string{"csrf_token": csrfToken})
+	req.AddCookie(sessionCookie)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
@@ -128,11 +144,14 @@ func TestDownloadMissingFileReturnsNotFound(t *testing.T) {
 		}},
 	}
 	service := media.NewService(repo, brokenStore{})
-	handler := NewHandler(service, testTemplates(t), 10*1024*1024)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
 	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
 
 	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/media/asset-1/download", nil))
+	req := httptest.NewRequest(http.MethodGet, "/media/asset-1/download", nil)
+	req.AddCookie(sessionCookie)
+	router.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusNotFound {
 		t.Fatalf("expected status 404, got %d", resp.Code)
@@ -155,27 +174,105 @@ func TestViewMissingFileReturnsNotFound(t *testing.T) {
 		}},
 	}
 	service := media.NewService(repo, brokenStore{})
-	handler := NewHandler(service, testTemplates(t), 10*1024*1024)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
 	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
 
 	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/media/asset-1/view", nil))
+	req := httptest.NewRequest(http.MethodGet, "/media/asset-1/view", nil)
+	req.AddCookie(sessionCookie)
+	router.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusNotFound {
 		t.Fatalf("expected status 404, got %d", resp.Code)
 	}
 }
 
-func testTemplates(t *testing.T) *template.Template {
-	t.Helper()
-	return template.Must(template.New("list.html").Parse(`{{define "list.html"}}{{range .Assets}}{{.OriginalFilename}}{{end}}{{end}}{{define "detail.html"}}{{if eq .Asset.MediaType "image"}}<img src="/media/{{.Asset.ID}}/view" alt="{{.Asset.OriginalFilename}}">{{end}}{{if eq .Asset.MediaType "video"}}<video controls><source src="/media/{{.Asset.ID}}/view" type="{{.Asset.MIMEType}}"></video>{{end}}<a href="/media/{{.Asset.ID}}/download">download</a>{{end}}`))
+func TestProtectedRoutesRedirectWhenUnauthenticated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/media", nil))
+
+	if resp.Code != http.StatusSeeOther {
+		t.Fatalf("expected status 303, got %d", resp.Code)
+	}
+	if got := resp.Header().Get("Location"); got != "/login" {
+		t.Fatalf("expected redirect to /login, got %q", got)
+	}
 }
 
-func newUploadRequest(t *testing.T, fieldName string, filename string, content []byte) *http.Request {
+func TestUploadRejectsMissingCSRF(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+
+	req := newUploadRequest(t, "file", "photo.jpg", []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}, nil)
+	req.AddCookie(sessionCookie)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", resp.Code)
+	}
+}
+
+func testTemplates(t *testing.T) *template.Template {
+	t.Helper()
+	return template.Must(template.New("base").Parse(`
+{{define "list.html"}}
+<form action="/uploads" method="post" enctype="multipart/form-data">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<input id="file" name="file" type="file" required>
+</form>
+{{range .Assets}}{{.OriginalFilename}}{{end}}
+{{end}}
+{{define "detail.html"}}
+{{if eq .Asset.MediaType "image"}}<img src="/media/{{.Asset.ID}}/view" alt="{{.Asset.OriginalFilename}}">{{end}}
+{{if eq .Asset.MediaType "video"}}<video controls><source src="/media/{{.Asset.ID}}/view" type="{{.Asset.MIMEType}}"></video>{{end}}
+<a href="/media/{{.Asset.ID}}/download">download</a>
+<form action="/logout" method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
+{{end}}
+{{define "login.html"}}
+{{if .Error}}<p>{{.Error}}</p>{{end}}
+<form action="/login" method="post">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<input name="username" type="text">
+<input name="password" type="password">
+</form>
+{{end}}
+`))
+}
+
+func newUploadRequest(t *testing.T, fieldName string, filename string, content []byte, fields map[string]string) *http.Request {
 	t.Helper()
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("WriteField returned error: %v", err)
+		}
+	}
 	part, err := writer.CreateFormFile(fieldName, filename)
 	if err != nil {
 		t.Fatalf("CreateFormFile returned error: %v", err)
@@ -190,6 +287,78 @@ func newUploadRequest(t *testing.T, fieldName string, filename string, content [
 	req := httptest.NewRequest(http.MethodPost, "/uploads", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	return req
+}
+
+func testAuth() *AuthService {
+	return NewAuthService("admin", "pass123", "test-secret", 24*time.Hour)
+}
+
+func loginAndGetSessionCookie(t *testing.T, router *gin.Engine) *http.Cookie {
+	t.Helper()
+
+	loginPageResp := httptest.NewRecorder()
+	router.ServeHTTP(loginPageResp, httptest.NewRequest(http.MethodGet, "/login", nil))
+	if loginPageResp.Code != http.StatusOK {
+		t.Fatalf("expected login page status 200, got %d", loginPageResp.Code)
+	}
+
+	loginCSRF := extractCSRFToken(t, loginPageResp.Body.String())
+	loginCSRFCookie := findCookie(t, loginPageResp.Result().Cookies(), loginCSRFCookieName)
+
+	form := url.Values{}
+	form.Set("username", "admin")
+	form.Set("password", "pass123")
+	form.Set("csrf_token", loginCSRF)
+	loginReq := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginReq.AddCookie(loginCSRFCookie)
+
+	loginResp := httptest.NewRecorder()
+	router.ServeHTTP(loginResp, loginReq)
+	if loginResp.Code != http.StatusSeeOther {
+		t.Fatalf("expected login status 303, got %d with body %q", loginResp.Code, loginResp.Body.String())
+	}
+
+	return findCookie(t, loginResp.Result().Cookies(), sessionCookieName)
+}
+
+func getPageCSRFToken(t *testing.T, router *gin.Engine, path string, sessionCookie *http.Cookie) string {
+	t.Helper()
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.AddCookie(sessionCookie)
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected %s status 200, got %d", path, resp.Code)
+	}
+
+	return extractCSRFToken(t, resp.Body.String())
+}
+
+func extractCSRFToken(t *testing.T, body string) string {
+	t.Helper()
+
+	re := regexp.MustCompile(`name="csrf_token"\s+value="([^"]+)"`)
+	matches := re.FindStringSubmatch(body)
+	if len(matches) != 2 {
+		t.Fatalf("csrf token not found in body: %q", body)
+	}
+
+	return matches[1]
+}
+
+func findCookie(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie {
+	t.Helper()
+
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+
+	t.Fatalf("cookie %q not found", name)
+	return nil
 }
 
 type memoryRepository struct {

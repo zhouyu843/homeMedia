@@ -26,18 +26,67 @@ type Handler struct {
 	service        MediaService
 	templates      *template.Template
 	maxUploadBytes int64
+	auth           *AuthService
 }
 
-func NewHandler(service MediaService, templates *template.Template, maxUploadBytes int64) Handler {
+func NewHandler(service MediaService, templates *template.Template, maxUploadBytes int64, auth *AuthService) Handler {
 	return Handler{
 		service:        service,
 		templates:      templates,
 		maxUploadBytes: maxUploadBytes,
+		auth:           auth,
 	}
 }
 
 func (h Handler) Home(c *gin.Context) {
+	if h.auth.IsAuthenticated(c.Request) {
+		c.Redirect(http.StatusSeeOther, "/media")
+		return
+	}
+
+	c.Redirect(http.StatusSeeOther, "/login")
+}
+
+func (h Handler) LoginPage(c *gin.Context) {
+	if h.auth.IsAuthenticated(c.Request) {
+		c.Redirect(http.StatusSeeOther, "/media")
+		return
+	}
+
+	h.renderLogin(c, http.StatusOK, "")
+}
+
+func (h Handler) LoginSubmit(c *gin.Context) {
+	if h.auth.IsAuthenticated(c.Request) {
+		c.Redirect(http.StatusSeeOther, "/media")
+		return
+	}
+
+	if !h.auth.VerifyLoginCSRF(c.Request, c.PostForm("csrf_token")) {
+		c.String(http.StatusForbidden, "invalid csrf token")
+		return
+	}
+
+	username := c.PostForm("username")
+	password := c.PostForm("password")
+	if !h.auth.AuthenticateCredentials(username, password) {
+		h.renderLogin(c, http.StatusUnauthorized, "用户名或密码错误")
+		return
+	}
+
+	h.auth.StartSession(c, username)
+	h.auth.ClearLoginCSRF(c)
 	c.Redirect(http.StatusSeeOther, "/media")
+}
+
+func (h Handler) Logout(c *gin.Context) {
+	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
+		c.String(http.StatusForbidden, "invalid csrf token")
+		return
+	}
+
+	h.auth.EndSession(c)
+	c.Redirect(http.StatusSeeOther, "/login")
 }
 
 func (h Handler) ListMedia(c *gin.Context) {
@@ -47,9 +96,16 @@ func (h Handler) ListMedia(c *gin.Context) {
 		return
 	}
 
+	csrfToken, ok := h.auth.SessionCSRFToken(c.Request)
+	if !ok {
+		c.String(http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	c.Status(http.StatusOK)
 	if err := h.templates.ExecuteTemplate(c.Writer, "list.html", gin.H{
-		"Assets": assets,
+		"Assets":    assets,
+		"CSRFToken": csrfToken,
 	}); err != nil {
 		c.String(http.StatusInternalServerError, "render list failed")
 	}
@@ -62,9 +118,16 @@ func (h Handler) ShowMedia(c *gin.Context) {
 		return
 	}
 
+	csrfToken, ok := h.auth.SessionCSRFToken(c.Request)
+	if !ok {
+		c.String(http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	c.Status(http.StatusOK)
 	if err := h.templates.ExecuteTemplate(c.Writer, "detail.html", gin.H{
-		"Asset": asset,
+		"Asset":     asset,
+		"CSRFToken": csrfToken,
 	}); err != nil {
 		c.String(http.StatusInternalServerError, "render detail failed")
 	}
@@ -74,6 +137,11 @@ func (h Handler) UploadMedia(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, h.maxUploadBytes)
 	if err := c.Request.ParseMultipartForm(h.maxUploadBytes); err != nil {
 		c.String(http.StatusBadRequest, "invalid upload payload")
+		return
+	}
+
+	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
+		c.String(http.StatusForbidden, "invalid csrf token")
 		return
 	}
 
@@ -90,6 +158,22 @@ func (h Handler) UploadMedia(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusSeeOther, "/media/"+asset.ID)
+}
+
+func (h Handler) renderLogin(c *gin.Context, status int, errMsg string) {
+	csrfToken, err := h.auth.IssueLoginCSRF(c)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "issue csrf failed")
+		return
+	}
+
+	c.Status(status)
+	if err := h.templates.ExecuteTemplate(c.Writer, "login.html", gin.H{
+		"Error":     errMsg,
+		"CSRFToken": csrfToken,
+	}); err != nil {
+		c.String(http.StatusInternalServerError, "render login failed")
+	}
 }
 
 func (h Handler) DownloadMedia(c *gin.Context) {

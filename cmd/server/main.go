@@ -42,9 +42,15 @@ func main() {
 		log.Fatal(err)
 	}
 	service := media.NewService(repository, store)
+	authService := apphttp.NewAuthService(
+		cfg.AdminUsername,
+		cfg.AdminPassword,
+		cfg.SessionSecret,
+		time.Duration(cfg.SessionTTLHours)*time.Hour,
+	)
 
 	templates := template.Must(template.ParseGlob("web/templates/*.html"))
-	handler := apphttp.NewHandler(serviceAdapter{service: service}, templates, cfg.MaxUploadSizeMB*1024*1024)
+	handler := apphttp.NewHandler(serviceAdapter{service: service}, templates, cfg.MaxUploadSizeMB*1024*1024, authService)
 	router := apphttp.NewRouter(handler)
 
 	server := &http.Server{

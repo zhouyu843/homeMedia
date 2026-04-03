@@ -16,7 +16,13 @@
     <h1>HomeMedia</h1>
     <p class="muted">最小私有照片和视频库 MVP</p>
 
+    <form action="/logout" method="post">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button type="submit">退出登录</button>
+    </form>
+
     <form action="/uploads" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <label for="file">上传图片或视频</label>
         <input id="file" name="file" type="file" required>
         <button type="submit">上传</button>
