@@ -6,6 +6,8 @@ import (
 	"strconv"
 )
 
+const uploadRootDir = "/data/uploads"
+
 type Config struct {
 	AppPort         string
 	DatabaseURL     string
@@ -21,7 +23,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		AppPort:         getEnv("APP_PORT", "8080"),
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
-		UploadRootDir:   getEnv("UPLOAD_ROOT_DIR", "./data/uploads"),
+		UploadRootDir:   uploadRootDir,
 		MaxUploadSizeMB: getEnvAsInt64("MAX_UPLOAD_SIZE_MB", 200),
 		AdminUsername:   getEnv("ADMIN_USERNAME", "admin"),
 		AdminPassword:   os.Getenv("ADMIN_PASSWORD"),

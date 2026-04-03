@@ -47,26 +47,31 @@
 cp .env.example .env
 ```
 
-2. 启动开发环境：
+2. 上传文件会保存到项目根目录下的 `data/uploads/`，目录不存在时请先创建：
+
+```bash
+mkdir -p data/uploads
+```
+
+3. 启动开发环境：
 
 ```bash
 docker compose up --build
 ```
 
-3. 打开浏览器：
+4. 打开浏览器：
 
 ```text
 http://127.0.0.1:8080/login
 ```
 
-4. 使用 `.env` 中的管理员账号密码登录。
+5. 使用 `.env` 中的管理员账号密码登录。
 
 ## 环境变量
 
 基础运行配置：
 - `APP_PORT`：服务端口（默认 `8080`）
 - `DATABASE_URL`：PostgreSQL 连接串
-- `UPLOAD_ROOT_DIR`：本地文件存储目录
 - `MAX_UPLOAD_SIZE_MB`：上传大小上限（MB）
 
 认证与会话配置：
@@ -95,6 +100,18 @@ docker compose run --rm app sh -c 'gofmt -w ./cmd ./internal'
 docker compose run --rm migrate
 ```
 
+进入 PostgreSQL 容器：
+
+```bash
+docker compose exec postgres sh
+```
+
+进入 PostgreSQL 命令行：
+
+```bash
+docker compose exec postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
 停止环境：
 
 ```bash
@@ -121,6 +138,6 @@ docker compose down
 ## 开发说明
 
 - PostgreSQL 只存元数据，不存文件二进制。
-- 原始文件保存到本地挂载目录。
+- 原始文件固定保存到宿主机的 `./data/uploads/`，容器内固定路径为 `/data/uploads`。
 - 当前开发环境以 Docker Compose 为准。
 - 宿主机如果没有 Go 工具链，可以直接通过容器执行测试和格式化。
