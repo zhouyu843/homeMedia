@@ -84,3 +84,7 @@ func (a serviceAdapter) Get(ctx context.Context, id string) (media.Asset, error)
 func (a serviceAdapter) Download(ctx context.Context, id string) (media.Asset, io.ReadSeekCloser, error) {
 	return a.service.Download(ctx, id)
 }
+
+func (a serviceAdapter) Thumbnail(ctx context.Context, id string) (string, []byte, error) {
+	return a.service.Thumbnail(ctx, id)
+}

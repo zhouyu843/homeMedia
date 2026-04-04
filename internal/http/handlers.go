@@ -20,6 +20,7 @@ type MediaService interface {
 	List(ctx context.Context) ([]media.Asset, error)
 	Get(ctx context.Context, id string) (media.Asset, error)
 	Download(ctx context.Context, id string) (media.Asset, io.ReadSeekCloser, error)
+	Thumbnail(ctx context.Context, id string) (string, []byte, error)
 }
 
 type Handler struct {
@@ -202,6 +203,17 @@ func (h Handler) ViewMedia(c *gin.Context) {
 	http.ServeContent(c.Writer, c.Request, asset.OriginalFilename, asset.CreatedAt, file)
 }
 
+func (h Handler) ThumbnailMedia(c *gin.Context) {
+	contentType, thumbnail, err := h.service.Thumbnail(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.writeMediaError(c, err)
+		return
+	}
+
+	c.Header("Cache-Control", "private, max-age=600")
+	c.Data(http.StatusOK, contentType, thumbnail)
+}
+
 func (h Handler) uploadFromHeader(c *gin.Context, fileHeader *multipart.FileHeader) (media.Asset, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -240,6 +252,8 @@ func (h Handler) writeMediaError(c *gin.Context, err error) {
 		c.String(http.StatusNotFound, err.Error())
 	case errors.Is(err, media.ErrInvalidStoragePath):
 		c.String(http.StatusBadRequest, err.Error())
+	case errors.Is(err, media.ErrThumbnailGeneration):
+		c.String(http.StatusInternalServerError, err.Error())
 	default:
 		c.String(http.StatusInternalServerError, "internal server error")
 	}

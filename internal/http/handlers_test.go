@@ -188,6 +188,58 @@ func TestViewMissingFileReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestThumbnailMediaReturnsJPEG(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	uploadCSRFToken := getPageCSRFToken(t, router, "/media", sessionCookie)
+
+	validTinyPNG := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0x99, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+		0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
+		0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	uploadReq := newUploadRequest(t, "file", "photo.png", validTinyPNG, map[string]string{"csrf_token": uploadCSRFToken})
+	uploadReq.AddCookie(sessionCookie)
+	uploadResp := httptest.NewRecorder()
+	router.ServeHTTP(uploadResp, uploadReq)
+	if uploadResp.Code != http.StatusSeeOther {
+		t.Fatalf("expected upload redirect, got %d with body %q", uploadResp.Code, uploadResp.Body.String())
+	}
+
+	assetID := repo.assets[0].ID
+
+	thumbResp := httptest.NewRecorder()
+	thumbReq := httptest.NewRequest(http.MethodGet, "/media/"+assetID+"/thumbnail", nil)
+	thumbReq.AddCookie(sessionCookie)
+	router.ServeHTTP(thumbResp, thumbReq)
+
+	if thumbResp.Code != http.StatusOK {
+		t.Fatalf("expected thumbnail status 200, got %d with body %q", thumbResp.Code, thumbResp.Body.String())
+	}
+	if got := thumbResp.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("expected thumbnail content type image/jpeg, got %q", got)
+	}
+	if len(thumbResp.Body.Bytes()) == 0 {
+		t.Fatal("expected thumbnail body not empty")
+	}
+}
+
 func TestProtectedRoutesRedirectWhenUnauthenticated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -249,6 +301,7 @@ func testTemplates(t *testing.T) *template.Template {
 {{define "detail.html"}}
 {{if eq .Asset.MediaType "image"}}<img src="/media/{{.Asset.ID}}/view" alt="{{.Asset.OriginalFilename}}">{{end}}
 {{if eq .Asset.MediaType "video"}}<video controls><source src="/media/{{.Asset.ID}}/view" type="{{.Asset.MIMEType}}"></video>{{end}}
+<img src="/media/{{.Asset.ID}}/thumbnail" alt="thumb">
 <a href="/media/{{.Asset.ID}}/download">download</a>
 <form action="/logout" method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
 {{end}}

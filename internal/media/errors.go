@@ -7,4 +7,5 @@ var (
 	ErrNotFound             = errors.New("media asset not found")
 	ErrFileMissing          = errors.New("media file missing")
 	ErrInvalidStoragePath   = errors.New("invalid storage path")
+	ErrThumbnailGeneration  = errors.New("thumbnail generation failed")
 )

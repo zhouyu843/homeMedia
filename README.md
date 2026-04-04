@@ -4,20 +4,22 @@
 
 当前版本已增加基础登录保护，媒体相关页面和上传/下载接口都需要登录后访问。
 
-当前版本聚焦 MVP，只提供四条核心链路：
+当前版本聚焦 MVP，只提供几条核心链路：
 - 上传图片和视频
 - 浏览媒体列表
+- 列表缩略图预览（图片和视频）
 - 查看单个媒体详情并直接预览图片/视频
 - 下载原始文件
 - 登录/登出（单管理员账号）
 
 详情页行为说明：
 - 访问 `/media/:id` 进入详情页，页面内嵌预览图片或视频。
+- 访问 `/media/:id/thumbnail` 获取媒体缩略图（JPEG）。
 - 访问 `/media/:id/download` 下载原始文件。
 
 鉴权行为说明：
 - 访问 `/login` 打开登录页。
-- 访问 `/media`、`/media/:id`、`/media/:id/view`、`/media/:id/download`、`/uploads` 需要已登录会话。
+- 访问 `/media`、`/media/:id`、`/media/:id/view`、`/media/:id/thumbnail`、`/media/:id/download`、`/uploads` 需要已登录会话。
 - 退出登录使用 `POST /logout`。
 
 ## 技术栈
@@ -124,7 +126,6 @@ docker compose down
 - 多用户账号体系
 - 开放注册和找回密码
 - 对象存储
-- 缩略图或转码
 - 搜索、标签、相册
 - 分享链接
 - 异步任务系统
@@ -139,5 +140,6 @@ docker compose down
 
 - PostgreSQL 只存元数据，不存文件二进制。
 - 原始文件固定保存到宿主机的 `./data/uploads/`，容器内固定路径为 `/data/uploads`。
+- 应用容器包含 `ffmpeg`，用于生成图片和视频缩略图。
 - 当前开发环境以 Docker Compose 为准。
 - 宿主机如果没有 Go 工具链，可以直接通过容器执行测试和格式化。

@@ -1,10 +1,13 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -84,6 +87,21 @@ func (s Service) Download(ctx context.Context, id string) (Asset, io.ReadSeekClo
 	return asset, file, nil
 }
 
+func (s Service) Thumbnail(ctx context.Context, id string) (string, []byte, error) {
+	asset, file, err := s.Download(ctx, id)
+	if err != nil {
+		return "", nil, err
+	}
+	defer file.Close()
+
+	thumb, err := generateThumbnailWithFFmpeg(ctx, file, asset.MediaType)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return "image/jpeg", thumb, nil
+}
+
 func mediaTypeFromMIME(mimeType string) (MediaType, error) {
 	if mimeType == "" {
 		return "", ErrUnsupportedMediaType
@@ -112,4 +130,46 @@ var allowedVideoMIMETypes = map[string]struct{}{
 	"video/quicktime":  {},
 	"video/webm":       {},
 	"video/x-matroska": {},
+}
+
+func generateThumbnailWithFFmpeg(ctx context.Context, source io.Reader, mediaType MediaType) ([]byte, error) {
+	tctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+
+	filter := "scale=360:-1"
+	if mediaType == MediaTypeVideo {
+		filter = "thumbnail,scale=360:-1"
+	}
+
+	cmd := exec.CommandContext(
+		tctx,
+		"ffmpeg",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", "pipe:0",
+		"-vf", filter,
+		"-frames:v", "1",
+		"-f", "image2pipe",
+		"-vcodec", "mjpeg",
+		"pipe:1",
+	)
+
+	cmd.Stdin = source
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+
+	if err := cmd.Run(); err != nil {
+		if strings.TrimSpace(errOut.String()) != "" {
+			return nil, fmt.Errorf("%w: %s", ErrThumbnailGeneration, strings.TrimSpace(errOut.String()))
+		}
+		return nil, fmt.Errorf("%w: %v", ErrThumbnailGeneration, err)
+	}
+
+	if out.Len() == 0 {
+		return nil, ErrThumbnailGeneration
+	}
+
+	return out.Bytes(), nil
 }
