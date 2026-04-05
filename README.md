@@ -23,18 +23,19 @@
 - 内容相同但文件名不同：复用已有媒体资源，不重复保存物理文件。
 - 文件名相同但内容不同：视为不同媒体，允许共存。
 - JSON 上传接口 `POST /api/uploads` 在新建时返回 `201`，命中重复内容时返回 `200`，响应体会包含 `existing` 布尔字段。
-- 该能力对迁移后新上传的文件立即生效；历史数据如需参与去重，需要额外补齐 `content_hash`。
+- 前端上传增强区域会把“新上传成功”和“文件已存在，已复用”区分展示；命中已存在资源时不会重复插入列表卡片。
+- 历史数据如果尚未写入 `content_hash`，系统会在后续遇到同大小文件上传时尝试按内容懒匹配并回填哈希。
 
-本次上传去重改动生效步骤：
-- 这次改动只涉及 Go 代码和数据库 migration，不涉及前端构建产物。
-- 如果容器还没启动，直接执行 `docker compose up --build` 即可；`migrate` 会自动执行，`app` 会以最新代码启动。
-- 如果开发环境已经在运行，通常不需要重建 Docker 镜像，因为 `app` 服务通过 `./:/app` 挂载了本地代码。
-- 但需要执行一次数据库迁移：`docker compose run --rm migrate`。
-- 然后重启应用进程让新代码生效：`docker compose restart app`。
-- 如果你刚改了 Go 依赖、Dockerfile、系统包或基础镜像，再执行 `docker compose up -d --build` 更稳妥。
-- 变更完成后，建议执行 `docker compose run --rm app go test ./...` 做一次回归验证。
+修改代码后的生效步骤：
+- 如果容器还没启动，直接执行 `docker compose up --build` 即可；服务会按当前代码和配置启动。
+- 如果开发环境已经在运行，Go 代码、模板、migration 等修改通常不需要重建 Docker 镜像，因为 `app` 服务通过 `./:/app` 挂载了本地代码。
+- 改了数据库 migration 后，先执行 `docker compose run --rm migrate`。
+- 改了 Go 后端代码后，执行 `docker compose restart app` 让应用进程重新启动并加载最新代码。
+- 改了前端静态资源或 React 岛屿代码后，需要重新构建前端资源，例如执行 `make frontend-build`。
+- 改了 Go 依赖、Dockerfile、系统包或基础镜像后，执行 `docker compose up -d --build` 重新构建并启动容器。
+- 变更完成后，建议执行 `docker compose run --rm app go test ./...`，前端改动可额外执行 `make frontend-test` 做回归验证。
 
-推荐的增量更新命令：
+常见的增量更新命令：
 
 ```bash
 docker compose run --rm migrate

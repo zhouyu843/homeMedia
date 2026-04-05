@@ -55,6 +55,14 @@ func (s Service) Upload(ctx context.Context, input UploadInput) (UploadResult, e
 		return UploadResult{}, err
 	}
 
+	legacyAsset, err := s.findLegacyAssetByContentHash(ctx, contentHash, sizeBytes)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	if legacyAsset.ID != "" {
+		return UploadResult{Asset: legacyAsset, Existing: true}, nil
+	}
+
 	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
 		return UploadResult{}, fmt.Errorf("rewind upload temp file: %w", err)
 	}
@@ -236,4 +244,46 @@ func createUploadTempFile(source io.Reader) (*os.File, string, int64, error) {
 	}
 
 	return tempFile, hex.EncodeToString(hasher.Sum(nil)), sizeBytes, nil
+}
+
+func (s Service) findLegacyAssetByContentHash(ctx context.Context, contentHash string, sizeBytes int64) (Asset, error) {
+	candidates, err := s.repository.FindWithoutContentHashBySize(ctx, sizeBytes)
+	if err != nil {
+		return Asset{}, err
+	}
+
+	for _, candidate := range candidates {
+		file, err := s.fileStore.Open(candidate.StoragePath)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, ErrInvalidStoragePath) {
+				continue
+			}
+			return Asset{}, err
+		}
+
+		candidateHash, hashErr := hashReadSeeker(file)
+		_ = file.Close()
+		if hashErr != nil {
+			return Asset{}, hashErr
+		}
+
+		if updateErr := s.repository.UpdateContentHash(ctx, candidate.ID, candidateHash); updateErr != nil && !errors.Is(updateErr, ErrDuplicateContentHash) {
+			return Asset{}, updateErr
+		}
+
+		if candidateHash == contentHash {
+			candidate.ContentHash = candidateHash
+			return candidate, nil
+		}
+	}
+
+	return Asset{}, nil
+}
+
+func hashReadSeeker(reader io.Reader) (string, error) {
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, reader); err != nil {
+		return "", fmt.Errorf("hash stored file: %w", err)
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }

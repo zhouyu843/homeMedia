@@ -27,7 +27,7 @@ type UploadItem = {
 type RecentResult = {
   id: string;
   filename: string;
-  status: "success" | "error";
+  status: "success" | "error" | "info";
   message: string;
 };
 
@@ -113,11 +113,26 @@ function UploadIslandApp({ config }: { config: UploadConfig }) {
       );
 
       try {
-        const asset = await uploadFile(config, target.file, (progress) => {
+        const response = await uploadFile(config, target.file, (progress) => {
           setItems((current) =>
             current.map((item) => (item.id === itemId ? { ...item, progress } : item))
           );
         });
+        const asset = response.asset;
+
+        if (response.existing) {
+          if (target.previewUrl) {
+            URL.revokeObjectURL(target.previewUrl);
+          }
+          setItems((current) => current.filter((item) => item.id !== itemId));
+          pushRecentResult({
+            id: makeId(),
+            filename: target.file.name,
+            status: "info",
+            message: "文件已存在，未重复上传"
+          });
+          return;
+        }
 
         setItems((current) =>
           current.map((item) =>
@@ -262,8 +277,20 @@ function UploadIslandApp({ config }: { config: UploadConfig }) {
             {recentResults.map((result) => (
               <li key={result.id} style={recentItemStyle}>
                 <span>{result.filename}</span>
-                <span style={result.status === "success" ? recentSuccessStyle : recentErrorStyle}>
-                  {result.status === "success" ? "成功" : `失败: ${result.message}`}
+                <span
+                  style={
+                    result.status === "success"
+                      ? recentSuccessStyle
+                      : result.status === "info"
+                        ? recentInfoStyle
+                        : recentErrorStyle
+                  }
+                >
+                  {result.status === "success"
+                    ? "成功"
+                    : result.status === "info"
+                      ? result.message
+                      : `失败: ${result.message}`}
                 </span>
               </li>
             ))}
@@ -358,6 +385,11 @@ function prependAssetCard(asset: ApiAsset) {
       empty.remove();
     }
     shell.appendChild(gallery);
+  }
+
+  const existingCard = gallery.querySelector(`.card[href="${asset.detailUrl}"]`);
+  if (existingCard) {
+    return;
   }
 
   const card = document.createElement("a");
@@ -626,6 +658,10 @@ const recentItemStyle: React.CSSProperties = {
 };
 
 const recentSuccessStyle: React.CSSProperties = {
+  color: "#0f766e"
+};
+
+const recentInfoStyle: React.CSSProperties = {
   color: "#0f766e"
 };
 

@@ -11,6 +11,11 @@ export type ApiAsset = {
   downloadUrl: string;
 };
 
+export type UploadResponse = {
+  asset: ApiAsset;
+  existing: boolean;
+};
+
 export type UploadConfig = {
   csrfToken: string;
   maxUploadBytes: number;
@@ -45,12 +50,12 @@ export async function uploadFile(
   config: UploadConfig,
   file: File,
   onProgress: (progress: number) => void
-): Promise<ApiAsset> {
+): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("csrf_token", config.csrfToken);
 
-  return new Promise<ApiAsset>((resolve, reject) => {
+  return new Promise<UploadResponse>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", config.uploadUrl, true);
     xhr.responseType = "json";
@@ -67,10 +72,13 @@ export async function uploadFile(
     };
 
     xhr.onload = () => {
-      const response = xhr.response as { asset?: ApiAsset; code?: string; message?: string } | null;
+      const response = xhr.response as { asset?: ApiAsset; existing?: boolean; code?: string; message?: string } | null;
       if (xhr.status >= 200 && xhr.status < 300 && response?.asset) {
         onProgress(100);
-        resolve(response.asset);
+        resolve({
+          asset: response.asset,
+          existing: response.existing === true
+        });
         return;
       }
 

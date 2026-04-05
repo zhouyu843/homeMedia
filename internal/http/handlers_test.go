@@ -239,6 +239,51 @@ func TestAPIUploadReturnsExistingAssetForDuplicateContent(t *testing.T) {
 	}
 }
 
+func TestAPIUploadMatchesLegacyAssetWithoutContentHash(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{assets: []media.Asset{{
+		ID:               "asset-legacy",
+		OriginalFilename: "photo-original.jpg",
+		StoredFilename:   "stored-legacy.jpg",
+		MediaType:        media.MediaTypeImage,
+		MIMEType:         "image/jpeg",
+		SizeBytes:        7,
+		StoragePath:      "20260403/stored-legacy.jpg",
+		CreatedAt:        time.Now().UTC(),
+	}}}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+	storedFile, err := store.Save(context.Background(), "photo-original.jpg", bytes.NewReader([]byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}))
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	repo.assets[0].StoredFilename = storedFile.StoredFilename
+	repo.assets[0].StoragePath = storedFile.StoragePath
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	uploadCSRFToken := getPageCSRFToken(t, router, "/media", sessionCookie)
+	body := []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}
+
+	req := newUploadRequest(t, "file", "photo-copy.jpg", body, map[string]string{"csrf_token": uploadCSRFToken})
+	req.URL.Path = "/api/uploads"
+	req.Header.Set("X-CSRF-Token", uploadCSRFToken)
+	req.AddCookie(sessionCookie)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected duplicate upload status 200, got %d with body %q", resp.Code, resp.Body.String())
+	}
+	if len(repo.assets) != 1 {
+		t.Fatalf("expected legacy asset to be reused, got %d assets", len(repo.assets))
+	}
+}
+
 func TestAPIUploadRejectsInvalidFileType(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -629,6 +674,31 @@ func (m *memoryRepository) FindByContentHash(_ context.Context, contentHash stri
 		}
 	}
 	return media.Asset{}, media.ErrNotFound
+}
+
+func (m *memoryRepository) FindWithoutContentHashBySize(_ context.Context, sizeBytes int64) ([]media.Asset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var assets []media.Asset
+	for _, asset := range m.assets {
+		if asset.ContentHash == "" && asset.SizeBytes == sizeBytes {
+			assets = append(assets, asset)
+		}
+	}
+	return assets, nil
+}
+
+func (m *memoryRepository) UpdateContentHash(_ context.Context, id string, contentHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for index, asset := range m.assets {
+		if asset.ID == id {
+			asset.ContentHash = contentHash
+			m.assets[index] = asset
+			return nil
+		}
+	}
+	return media.ErrNotFound
 }
 
 func (m *memoryRepository) ListRecent(_ context.Context) ([]media.Asset, error) {

@@ -154,6 +154,43 @@ func TestServiceUploadDeletesStoredFileWhenRepositoryReportsDuplicateContentHash
 	}
 }
 
+func TestServiceUploadMatchesLegacyAssetWithoutContentHash(t *testing.T) {
+	legacyAsset := Asset{
+		ID:               "asset-legacy",
+		OriginalFilename: "old-photo.jpg",
+		StoredFilename:   "stored-legacy.jpg",
+		MediaType:        MediaTypeImage,
+		MIMEType:         "image/jpeg",
+		SizeBytes:        4,
+		StoragePath:      "20260403/stored-legacy.jpg",
+		CreatedAt:        time.Now().UTC(),
+	}
+	repo := &fakeRepository{assetsWithoutContentHashBySize: map[int64][]Asset{4: {legacyAsset}}}
+	store := &fakeFileStore{openFile: readSeekNopCloser{Reader: strings.NewReader("data")}}
+	service := NewService(repo, store)
+
+	result, err := service.Upload(context.Background(), UploadInput{
+		OriginalFilename: "photo-copy.jpg",
+		MIMEType:         "image/jpeg",
+		Reader:           strings.NewReader("data"),
+	})
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if result.Created || !result.Existing {
+		t.Fatalf("expected existing upload result, got %+v", result)
+	}
+	if result.Asset.ID != legacyAsset.ID {
+		t.Fatalf("expected legacy asset ID %q, got %q", legacyAsset.ID, result.Asset.ID)
+	}
+	if store.saveCalls != 0 {
+		t.Fatalf("expected file store to be skipped for matched legacy content, got %d save calls", store.saveCalls)
+	}
+	if got := repo.updatedContentHashes[legacyAsset.ID]; got == "" {
+		t.Fatal("expected legacy asset content hash to be backfilled")
+	}
+}
+
 func TestServiceDownloadReturnsFileMissing(t *testing.T) {
 	repo := &fakeRepository{assetByID: map[string]Asset{
 		"asset-1": {ID: "asset-1", StoragePath: "20260403/missing.jpg"},
@@ -172,6 +209,8 @@ type fakeRepository struct {
 	saveErr    error
 	assetByID  map[string]Asset
 	assetByContentHash map[string]Asset
+	assetsWithoutContentHashBySize map[int64][]Asset
+	updatedContentHashes map[string]string
 	listAssets []Asset
 }
 
@@ -201,6 +240,18 @@ func (f *fakeRepository) FindByContentHash(_ context.Context, contentHash string
 		return Asset{}, ErrNotFound
 	}
 	return asset, nil
+}
+
+func (f *fakeRepository) FindWithoutContentHashBySize(_ context.Context, sizeBytes int64) ([]Asset, error) {
+	return f.assetsWithoutContentHashBySize[sizeBytes], nil
+}
+
+func (f *fakeRepository) UpdateContentHash(_ context.Context, id string, contentHash string) error {
+	if f.updatedContentHashes == nil {
+		f.updatedContentHashes = map[string]string{}
+	}
+	f.updatedContentHashes[id] = contentHash
+	return nil
 }
 
 func (f *fakeRepository) ListRecent(_ context.Context) ([]Asset, error) {
@@ -257,6 +308,22 @@ func (d *duplicateOnSaveRepository) FindByContentHash(_ context.Context, _ strin
 	return d.existingAsset, nil
 }
 
+func (d *duplicateOnSaveRepository) FindWithoutContentHashBySize(_ context.Context, _ int64) ([]Asset, error) {
+	return nil, nil
+}
+
+func (d *duplicateOnSaveRepository) UpdateContentHash(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
 func (d *duplicateOnSaveRepository) ListRecent(_ context.Context) ([]Asset, error) {
 	return nil, nil
+}
+
+type readSeekNopCloser struct {
+	*strings.Reader
+}
+
+func (r readSeekNopCloser) Close() error {
+	return nil
 }
