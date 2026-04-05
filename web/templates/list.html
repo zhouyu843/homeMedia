@@ -19,12 +19,21 @@
             font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
             background: radial-gradient(circle at 80% -10%, #dbeafe 0%, var(--bg) 48%);
             color: var(--text);
+            transition: background 140ms ease;
+        }
+        body.upload-page-drag-active {
+            background: radial-gradient(circle at 50% 0%, #ccfbf1 0%, var(--bg) 54%);
         }
         .shell {
             width: min(1120px, 100% - 2rem);
             margin: 1.5rem auto 2rem;
             display: grid;
             gap: 1.25rem;
+            transition: transform 140ms ease, filter 140ms ease;
+        }
+        body.upload-page-drag-active .shell {
+            transform: scale(0.995);
+            filter: saturate(1.04);
         }
         .topbar {
             display: flex;
@@ -195,6 +204,6 @@
         <p class="empty">还没有上传任何媒体。</p>
         {{end}}
     </div>
-    <script type="module" src="/static/react/upload-island.js?v=20260405-2"></script>
+    <script type="module" src="/static/react/upload-island.js?v=20260406-1"></script>
 </body>
 </html>

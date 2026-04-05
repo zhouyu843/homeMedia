@@ -11,6 +11,8 @@ import {
 } from "./api-client";
 import { summarizeUploads } from "./upload-metrics";
 
+const PAGE_DRAG_CLASS = "upload-page-drag-active";
+
 type UploadStatus = "queued" | "uploading" | "success" | "error";
 
 type UploadItem = {
@@ -31,13 +33,22 @@ type RecentResult = {
   message: string;
 };
 
-function UploadIslandApp({ config }: { config: UploadConfig }) {
+function hasFilePayload(dataTransfer: DataTransfer | null): boolean {
+  if (!dataTransfer?.types) {
+    return false;
+  }
+
+  return Array.from(dataTransfer.types).includes("Files");
+}
+
+export function UploadIslandApp({ config }: { config: UploadConfig }) {
   const [items, setItems] = React.useState<UploadItem[]>([]);
   const [isUploading, setIsUploading] = React.useState(false);
   const [isDragActive, setIsDragActive] = React.useState(false);
   const [recentResults, setRecentResults] = React.useState<RecentResult[]>([]);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const itemsRef = React.useRef<UploadItem[]>([]);
+  const dragDepthRef = React.useRef(0);
 
   const summary = React.useMemo(
     () =>
@@ -70,6 +81,13 @@ function UploadIslandApp({ config }: { config: UploadConfig }) {
     bindGalleryThumbnailFallbacks();
   }, []);
 
+  React.useEffect(() => {
+    document.body.classList.toggle(PAGE_DRAG_CLASS, isDragActive);
+    return () => {
+      document.body.classList.remove(PAGE_DRAG_CLASS);
+    };
+  }, [isDragActive]);
+
   const addFiles = React.useCallback(
     (files: FileList | null) => {
       if (!files || files.length === 0) {
@@ -96,6 +114,70 @@ function UploadIslandApp({ config }: { config: UploadConfig }) {
     },
     [config]
   );
+
+  React.useEffect(() => {
+    const resetDragState = () => {
+      dragDepthRef.current = 0;
+      setIsDragActive(false);
+    };
+
+    const onWindowDragEnter = (event: DragEvent) => {
+      if (!hasFilePayload(event.dataTransfer)) {
+        return;
+      }
+
+      dragDepthRef.current += 1;
+      setIsDragActive(true);
+    };
+
+    const onWindowDragOver = (event: DragEvent) => {
+      if (!hasFilePayload(event.dataTransfer)) {
+        return;
+      }
+
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "copy";
+      }
+      setIsDragActive(true);
+    };
+
+    const onWindowDragLeave = (event: DragEvent) => {
+      if (!hasFilePayload(event.dataTransfer)) {
+        return;
+      }
+
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) {
+        setIsDragActive(false);
+      }
+    };
+
+    const onWindowDrop = (event: DragEvent) => {
+      if (!hasFilePayload(event.dataTransfer)) {
+        return;
+      }
+
+      event.preventDefault();
+      addFiles(event.dataTransfer?.files ?? null);
+      resetDragState();
+    };
+
+    window.addEventListener("dragenter", onWindowDragEnter);
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("dragleave", onWindowDragLeave);
+    window.addEventListener("drop", onWindowDrop);
+    window.addEventListener("dragend", resetDragState);
+
+    return () => {
+      window.removeEventListener("dragenter", onWindowDragEnter);
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("dragleave", onWindowDragLeave);
+      window.removeEventListener("drop", onWindowDrop);
+      window.removeEventListener("dragend", resetDragState);
+      resetDragState();
+    };
+  }, [addFiles]);
 
   const uploadOne = React.useCallback(
     async (itemId: string) => {
@@ -134,11 +216,10 @@ function UploadIslandApp({ config }: { config: UploadConfig }) {
           return;
         }
 
-        setItems((current) =>
-          current.map((item) =>
-            item.id === itemId ? { ...item, status: "success", progress: 100 } : item
-          )
-        );
+        if (target.previewUrl) {
+          URL.revokeObjectURL(target.previewUrl);
+        }
+        setItems((current) => current.filter((item) => item.id !== itemId));
         pushRecentResult({
           id: makeId(),
           filename: target.file.name,
@@ -202,18 +283,26 @@ function UploadIslandApp({ config }: { config: UploadConfig }) {
 
   const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = 0;
     setIsDragActive(false);
     addFiles(event.dataTransfer.files);
   };
 
   const onDragOver = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = "copy";
     setIsDragActive(true);
   };
 
   const onDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+    dragDepthRef.current = 0;
     setIsDragActive(false);
   };
 
@@ -230,6 +319,11 @@ function UploadIslandApp({ config }: { config: UploadConfig }) {
 
   return (
     <div style={panelStyle}>
+      {isDragActive && (
+        <div style={pageDropOverlayStyle} aria-hidden="true">
+          <div style={pageDropOverlayMessageStyle}>松开即可上传到当前页面</div>
+        </div>
+      )}
       <div
         style={{ ...dropZoneStyle, ...(isDragActive ? dropZoneActiveStyle : {}) }}
         onDragOver={onDragOver}
@@ -304,9 +398,11 @@ function UploadIslandApp({ config }: { config: UploadConfig }) {
             <li key={item.id} style={itemStyle}>
               <div style={leftBlockStyle}>
                 <div style={previewWrapStyle}>{renderPreview(item)}</div>
-                <strong>{item.file.name}</strong>
-                <div style={subTextStyle}>
-                  {formatBytes(item.file.size)} · {item.file.type || "未知类型"}
+                <div style={fileInfoStyle}>
+                  <strong style={filenameStyle}>{item.file.name}</strong>
+                  <div style={subTextStyle}>
+                    {formatBytes(item.file.size)} · {item.file.type || "未知类型"}
+                  </div>
                 </div>
               </div>
               <div style={statusBlockStyle}>
@@ -475,7 +571,9 @@ const panelStyle: React.CSSProperties = {
   padding: "0.7rem",
   border: "1px solid #cbd5e1",
   borderRadius: "10px",
-  background: "#f8fafc"
+  background: "#f8fafc",
+  position: "relative",
+  zIndex: 1
 };
 
 const toolbarStyle: React.CSSProperties = {
@@ -486,9 +584,11 @@ const toolbarStyle: React.CSSProperties = {
 };
 
 const dropZoneStyle: React.CSSProperties = {
-  border: "2px dashed #94a3b8",
+  borderWidth: "2px",
+  borderStyle: "dashed",
+  borderColor: "#94a3b8",
   borderRadius: "10px",
-  padding: "0.75rem",
+  padding: "1rem",
   color: "#334155",
   background: "#f1f5f9",
   fontSize: "0.86rem",
@@ -512,14 +612,32 @@ const listStyle: React.CSSProperties = {
   display: "grid",
   gap: "0.55rem",
   listStyle: "none",
+  width: "100%",
   margin: 0,
   padding: 0
 };
 
 const leftBlockStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "0.7rem",
+  alignItems: "center",
+  minWidth: 0,
+  flex: "1 1 auto"
+};
+
+const fileInfoStyle: React.CSSProperties = {
   display: "grid",
-  gap: "0.3rem",
-  alignItems: "start"
+  gap: "0.22rem",
+  minWidth: 0,
+  flex: "1 1 auto"
+};
+
+const filenameStyle: React.CSSProperties = {
+  display: "block",
+  minWidth: 0,
+  overflow: "hidden",
+  whiteSpace: "nowrap",
+  textOverflow: "ellipsis"
 };
 
 const previewWrapStyle: React.CSSProperties = {
@@ -556,18 +674,23 @@ const previewFallbackStyle: React.CSSProperties = {
 const itemStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
+  alignItems: "center",
   gap: "1rem",
   border: "1px solid #dbe1ea",
   borderRadius: "10px",
   padding: "0.55rem 0.7rem",
-  background: "#ffffff"
+  background: "#ffffff",
+  width: "100%",
+  flexWrap: "nowrap"
 };
 
 const statusBlockStyle: React.CSSProperties = {
   minWidth: "180px",
   display: "grid",
   gap: "0.25rem",
-  justifyItems: "end"
+  justifyItems: "end",
+  alignItems: "center",
+  flex: "0 0 auto"
 };
 
 const subTextStyle: React.CSSProperties = {
@@ -667,6 +790,27 @@ const recentInfoStyle: React.CSSProperties = {
 
 const recentErrorStyle: React.CSSProperties = {
   color: "#b91c1c"
+};
+
+const pageDropOverlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: "0",
+  zIndex: 999,
+  pointerEvents: "none",
+  display: "grid",
+  placeItems: "center",
+  background: "rgba(15, 23, 42, 0.08)",
+  backdropFilter: "blur(2px)"
+};
+
+const pageDropOverlayMessageStyle: React.CSSProperties = {
+  padding: "0.95rem 1.3rem",
+  borderRadius: "999px",
+  border: "2px dashed #0f766e",
+  background: "rgba(240, 253, 250, 0.96)",
+  color: "#134e4a",
+  fontWeight: 700,
+  boxShadow: "0 18px 40px rgba(15, 118, 110, 0.18)"
 };
 
 const rootElement = document.getElementById("upload-island-root");

@@ -3,11 +3,11 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   define: {
-    "process.env.NODE_ENV": JSON.stringify("production"),
-    "process.env": JSON.stringify({}),
-    process: JSON.stringify({ env: {} })
+    "process.env.NODE_ENV": JSON.stringify(mode === "test" ? "test" : "production"),
+    "process.env": JSON.stringify({ NODE_ENV: mode === "test" ? "test" : "production" }),
+    process: JSON.stringify({ env: { NODE_ENV: mode === "test" ? "test" : "production" } })
   },
   plugins: [react()],
   build: {
@@ -21,7 +21,7 @@ export default defineConfig({
     sourcemap: true
   },
   test: {
-    environment: "node",
+    environment: "jsdom",
     include: ["src/**/*.test.ts"]
   }
-});
+}));
