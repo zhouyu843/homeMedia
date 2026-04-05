@@ -167,7 +167,13 @@
             <input id="file" name="file" type="file" required>
             <button type="submit">上传</button>
         </form>
-        <div id="upload-island-root"></div>
+        <div
+            id="upload-island-root"
+            data-csrf-token="{{.CSRFToken}}"
+            data-max-upload-bytes="{{.MaxUploadBytes}}"
+            data-allowed-mime-types="{{.AllowedMIMETypesCSV}}"
+            data-upload-url="/api/uploads"
+        ></div>
 
         {{if .Assets}}
         <section class="gallery">

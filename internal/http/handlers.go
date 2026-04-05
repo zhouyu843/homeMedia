@@ -9,6 +9,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -105,11 +107,29 @@ func (h Handler) ListMedia(c *gin.Context) {
 
 	c.Status(http.StatusOK)
 	if err := h.templates.ExecuteTemplate(c.Writer, "list.html", gin.H{
-		"Assets":    assets,
-		"CSRFToken": csrfToken,
+		"Assets":              assets,
+		"CSRFToken":           csrfToken,
+		"MaxUploadBytes":      h.maxUploadBytes,
+		"AllowedMIMETypes":    media.AllowedUploadMIMETypes(),
+		"AllowedMIMETypesCSV": strings.Join(media.AllowedUploadMIMETypes(), ","),
 	}); err != nil {
 		c.String(http.StatusInternalServerError, "render list failed")
 	}
+}
+
+func (h Handler) ListMediaJSON(c *gin.Context) {
+	assets, err := h.service.List(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, apiErrorResponse{Code: "internal_error", Message: "list media failed"})
+		return
+	}
+
+	result := make([]mediaAssetResponse, 0, len(assets))
+	for _, asset := range assets {
+		result = append(result, toMediaAssetResponse(asset))
+	}
+
+	c.JSON(http.StatusOK, gin.H{"assets": result})
 }
 
 func (h Handler) ShowMedia(c *gin.Context) {
@@ -141,7 +161,7 @@ func (h Handler) UploadMedia(c *gin.Context) {
 		return
 	}
 
-	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
+	if !h.auth.VerifySessionCSRF(c.Request, h.uploadCSRFToken(c)) {
 		c.String(http.StatusForbidden, "invalid csrf token")
 		return
 	}
@@ -159,6 +179,33 @@ func (h Handler) UploadMedia(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusSeeOther, "/media/"+asset.ID)
+}
+
+func (h Handler) UploadMediaJSON(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, h.maxUploadBytes)
+	if err := c.Request.ParseMultipartForm(h.maxUploadBytes); err != nil {
+		c.JSON(http.StatusBadRequest, apiErrorResponse{Code: "invalid_payload", Message: "invalid upload payload"})
+		return
+	}
+
+	if !h.auth.VerifySessionCSRF(c.Request, h.uploadCSRFToken(c)) {
+		c.JSON(http.StatusForbidden, apiErrorResponse{Code: "invalid_csrf", Message: "invalid csrf token"})
+		return
+	}
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apiErrorResponse{Code: "missing_file", Message: "file is required"})
+		return
+	}
+
+	asset, err := h.uploadFromHeader(c, fileHeader)
+	if err != nil {
+		h.writeMediaErrorJSON(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"asset": toMediaAssetResponse(asset)})
 }
 
 func (h Handler) renderLogin(c *gin.Context, status int, errMsg string) {
@@ -256,5 +303,62 @@ func (h Handler) writeMediaError(c *gin.Context, err error) {
 		c.String(http.StatusInternalServerError, err.Error())
 	default:
 		c.String(http.StatusInternalServerError, "internal server error")
+	}
+}
+
+func (h Handler) writeMediaErrorJSON(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, media.ErrUnsupportedMediaType):
+		c.JSON(http.StatusUnsupportedMediaType, apiErrorResponse{Code: "unsupported_media_type", Message: err.Error()})
+	case errors.Is(err, media.ErrNotFound), errors.Is(err, media.ErrFileMissing):
+		c.JSON(http.StatusNotFound, apiErrorResponse{Code: "not_found", Message: err.Error()})
+	case errors.Is(err, media.ErrInvalidStoragePath):
+		c.JSON(http.StatusBadRequest, apiErrorResponse{Code: "invalid_storage_path", Message: err.Error()})
+	case errors.Is(err, media.ErrThumbnailGeneration):
+		c.JSON(http.StatusInternalServerError, apiErrorResponse{Code: "thumbnail_generation_failed", Message: err.Error()})
+	default:
+		c.JSON(http.StatusInternalServerError, apiErrorResponse{Code: "internal_error", Message: "internal server error"})
+	}
+}
+
+func (h Handler) uploadCSRFToken(c *gin.Context) string {
+	token := c.GetHeader("X-CSRF-Token")
+	if token != "" {
+		return token
+	}
+	return c.PostForm("csrf_token")
+}
+
+type apiErrorResponse struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type mediaAssetResponse struct {
+	ID               string `json:"id"`
+	OriginalFilename string `json:"originalFilename"`
+	MediaType        string `json:"mediaType"`
+	MIMEType         string `json:"mimeType"`
+	SizeBytes        int64  `json:"sizeBytes"`
+	CreatedAt        string `json:"createdAt"`
+	DetailURL        string `json:"detailUrl"`
+	ViewURL          string `json:"viewUrl"`
+	ThumbnailURL     string `json:"thumbnailUrl"`
+	DownloadURL      string `json:"downloadUrl"`
+}
+
+func toMediaAssetResponse(asset media.Asset) mediaAssetResponse {
+	basePath := "/media/" + asset.ID
+	return mediaAssetResponse{
+		ID:               asset.ID,
+		OriginalFilename: asset.OriginalFilename,
+		MediaType:        string(asset.MediaType),
+		MIMEType:         asset.MIMEType,
+		SizeBytes:        asset.SizeBytes,
+		CreatedAt:        asset.CreatedAt.UTC().Format(time.RFC3339),
+		DetailURL:        basePath,
+		ViewURL:          basePath + "/view",
+		ThumbnailURL:     basePath + "/thumbnail",
+		DownloadURL:      basePath + "/download",
 	}
 }

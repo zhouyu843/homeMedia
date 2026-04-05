@@ -20,6 +20,7 @@
 鉴权行为说明：
 - 访问 `/login` 打开登录页。
 - 访问 `/media`、`/media/:id`、`/media/:id/view`、`/media/:id/thumbnail`、`/media/:id/download`、`/uploads` 需要已登录会话。
+- 前端上传增强接口：`GET /api/media`、`POST /api/uploads`（同样需要已登录会话）。
 - 退出登录使用 `POST /logout`。
 
 ## 技术栈
@@ -81,6 +82,7 @@ make frontend-build
 ```
 
 说明：列表页会尝试加载 `/static/react/upload-island.js`。如果未执行前端构建，核心 SSR 功能仍可用，但上传区 React 增强不会生效。
+前端开发服务器端口默认为 `5175`，对应容器端口映射 `5175:5175`。
 
 ## 环境变量
 
@@ -170,6 +172,7 @@ docker compose down
 前端集成边界（当前阶段）：
 - 仍以 Go + SSR 为主体，不做整站 SPA。
 - React 仅用于高交互区域（当前从列表页上传区开始）。
+- 已支持上传岛屿第一版：多文件选择、客户端类型/大小校验、逐文件上传状态、失败重试、上传成功后列表即时插入。
 - 会话认证、CSRF、防刷限流仍由后端负责。
 
 ## 安全说明（当前版本）

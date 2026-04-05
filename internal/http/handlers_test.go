@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"html/template"
 	"io"
 	"mime/multipart"
@@ -125,6 +126,90 @@ func TestUploadRejectsInvalidFileType(t *testing.T) {
 
 	if resp.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("expected status 415, got %d with body %q", resp.Code, resp.Body.String())
+	}
+}
+
+func TestAPIUploadReturnsJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	uploadCSRFToken := getPageCSRFToken(t, router, "/media", sessionCookie)
+
+	req := newUploadRequest(t, "file", "photo.jpg", []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}, map[string]string{"csrf_token": uploadCSRFToken})
+	req.URL.Path = "/api/uploads"
+	req.Header.Set("X-CSRF-Token", uploadCSRFToken)
+	req.AddCookie(sessionCookie)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d with body %q", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Asset struct {
+			ID               string `json:"id"`
+			OriginalFilename string `json:"originalFilename"`
+			DetailURL        string `json:"detailUrl"`
+		} `json:"asset"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal returned error: %v", err)
+	}
+
+	if payload.Asset.ID == "" {
+		t.Fatal("expected response asset id to be set")
+	}
+	if payload.Asset.OriginalFilename != "photo.jpg" {
+		t.Fatalf("expected originalFilename photo.jpg, got %q", payload.Asset.OriginalFilename)
+	}
+	if !strings.HasPrefix(payload.Asset.DetailURL, "/media/") {
+		t.Fatalf("expected detailUrl to start with /media/, got %q", payload.Asset.DetailURL)
+	}
+}
+
+func TestAPIUploadRejectsInvalidFileType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	csrfToken := getPageCSRFToken(t, router, "/media", sessionCookie)
+
+	req := newUploadRequest(t, "file", "notes.txt", []byte("plain text"), map[string]string{"csrf_token": csrfToken})
+	req.URL.Path = "/api/uploads"
+	req.AddCookie(sessionCookie)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected status 415, got %d with body %q", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal returned error: %v", err)
+	}
+	if payload.Code != "unsupported_media_type" {
+		t.Fatalf("expected code unsupported_media_type, got %q", payload.Code)
 	}
 }
 

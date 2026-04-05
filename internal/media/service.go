@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -130,6 +131,18 @@ var allowedVideoMIMETypes = map[string]struct{}{
 	"video/quicktime":  {},
 	"video/webm":       {},
 	"video/x-matroska": {},
+}
+
+func AllowedUploadMIMETypes() []string {
+	mimeTypes := make([]string, 0, len(allowedImageMIMETypes)+len(allowedVideoMIMETypes))
+	for mimeType := range allowedImageMIMETypes {
+		mimeTypes = append(mimeTypes, mimeType)
+	}
+	for mimeType := range allowedVideoMIMETypes {
+		mimeTypes = append(mimeTypes, mimeType)
+	}
+	sort.Strings(mimeTypes)
+	return mimeTypes
 }
 
 func generateThumbnailWithFFmpeg(ctx context.Context, source io.Reader, mediaType MediaType) ([]byte, error) {

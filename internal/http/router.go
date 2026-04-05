@@ -25,10 +25,12 @@ func NewRouter(handler Handler) *gin.Engine {
 	protected.Use(handler.auth.RequireAuth())
 	protected.POST("/logout", handler.Logout)
 	protected.GET("/media", handler.ListMedia)
+	protected.GET("/api/media", handler.ListMediaJSON)
 	protected.GET("/media/:id", handler.ShowMedia)
 	protected.GET("/media/:id/view", handler.ViewMedia)
 	protected.GET("/media/:id/thumbnail", handler.ThumbnailMedia)
 	protected.GET("/media/:id/download", handler.DownloadMedia)
+	protected.POST("/api/uploads", uploadLimiter.Middleware(), handler.UploadMediaJSON)
 	protected.POST("/uploads", uploadLimiter.Middleware(), handler.UploadMedia)
 
 	return router
