@@ -22,12 +22,16 @@ type Asset struct {
 	ContentHash      string
 	StoragePath      string
 	CreatedAt        time.Time
+	DeletedAt        *time.Time
 }
 
 type UploadResult struct {
-	Asset    Asset
-	Created  bool
-	Existing bool
+	Asset            Asset
+	Created          bool
+	Existing         bool
+	Restored         bool
+	RequiresDecision bool
+	DecisionAsset    Asset
 }
 
 type UploadInput struct {
@@ -35,7 +39,16 @@ type UploadInput struct {
 	MIMEType         string
 	SizeBytes        int64
 	Reader           io.Reader
+	DuplicateAction  DuplicateAction
 }
+
+type DuplicateAction string
+
+const (
+	DuplicateActionPrompt  DuplicateAction = ""
+	DuplicateActionRestore DuplicateAction = "restore"
+	DuplicateActionNew     DuplicateAction = "new"
+)
 
 type StoredFile struct {
 	StoredFilename string

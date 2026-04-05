@@ -7,6 +7,7 @@ import {
   uploadFile,
   validateFile,
   type ApiAsset,
+  type UploadDuplicateAction,
   type UploadConfig
 } from "./api-client";
 import { summarizeUploads } from "./upload-metrics";
@@ -21,6 +22,8 @@ type UploadItem = {
   status: UploadStatus;
   progress: number;
   error?: string;
+  errorCode?: string;
+  decisionAsset?: ApiAsset;
   previewKind: "image" | "video" | "none";
   previewUrl?: string;
   retryable: boolean;
@@ -180,7 +183,7 @@ export function UploadIslandApp({ config }: { config: UploadConfig }) {
   }, [addFiles]);
 
   const uploadOne = React.useCallback(
-    async (itemId: string) => {
+    async (itemId: string, duplicateAction?: UploadDuplicateAction) => {
       const target = items.find((item) => item.id === itemId);
       if (!target || (target.status !== "queued" && target.status !== "error")) {
         return;
@@ -199,7 +202,7 @@ export function UploadIslandApp({ config }: { config: UploadConfig }) {
           setItems((current) =>
             current.map((item) => (item.id === itemId ? { ...item, progress } : item))
           );
-        });
+        }, duplicateAction);
         const asset = response.asset;
 
         if (response.existing) {
@@ -216,6 +219,22 @@ export function UploadIslandApp({ config }: { config: UploadConfig }) {
           return;
         }
 
+        if (response.restored) {
+          if (target.previewUrl) {
+            URL.revokeObjectURL(target.previewUrl);
+          }
+          setItems((current) => current.filter((item) => item.id !== itemId));
+          pushRecentResult({
+            id: makeId(),
+            filename: target.file.name,
+            status: "success",
+            message: "已从回收站恢复旧项"
+          });
+          prependAssetCard(asset);
+          bindGalleryThumbnailFallbacks();
+          return;
+        }
+
         if (target.previewUrl) {
           URL.revokeObjectURL(target.previewUrl);
         }
@@ -229,6 +248,7 @@ export function UploadIslandApp({ config }: { config: UploadConfig }) {
         prependAssetCard(asset);
         bindGalleryThumbnailFallbacks();
       } catch (error) {
+        const uploadError = error as Error & { code?: string; asset?: ApiAsset };
         const message = error instanceof Error ? error.message : "upload failed";
         setItems((current) =>
           current.map((item) =>
@@ -237,7 +257,9 @@ export function UploadIslandApp({ config }: { config: UploadConfig }) {
                   ...item,
                   status: "error",
                   error: message,
-                  retryable: true
+                  errorCode: uploadError.code,
+                  decisionAsset: uploadError.code === "trashed_duplicate" ? uploadError.asset : undefined,
+                  retryable: uploadError.code !== "trashed_duplicate"
                 }
               : item
           )
@@ -245,8 +267,8 @@ export function UploadIslandApp({ config }: { config: UploadConfig }) {
         pushRecentResult({
           id: makeId(),
           filename: target.file.name,
-          status: "error",
-          message
+          status: uploadError.code === "trashed_duplicate" ? "info" : "error",
+          message: uploadError.code === "trashed_duplicate" ? "命中回收站重复内容，等待你选择" : message
         });
       }
     },
@@ -418,6 +440,16 @@ export function UploadIslandApp({ config }: { config: UploadConfig }) {
                     <button type="button" onClick={() => void uploadOne(item.id)} disabled={isUploading}>
                       重试
                     </button>
+                  )}
+                  {item.status === "error" && item.errorCode === "trashed_duplicate" && item.decisionAsset && (
+                    <>
+                      <button type="button" onClick={() => void uploadOne(item.id, "restore")} disabled={isUploading}>
+                        恢复旧项
+                      </button>
+                      <button type="button" onClick={() => void uploadOne(item.id, "new")} disabled={isUploading}>
+                        继续新建
+                      </button>
+                    </>
                   )}
                   {item.status !== "uploading" && (
                     <button type="button" onClick={() => removeItem(item.id)}>

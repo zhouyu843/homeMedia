@@ -209,7 +209,6 @@ func TestServiceDeleteRemovesAssetAndFile(t *testing.T) {
 		assetByID: map[string]Asset{
 			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg"},
 		},
-		storagePathCounts: map[string]int{"20260403/photo.jpg": 1},
 	}
 	store := &fakeFileStore{}
 	service := NewService(repo, store)
@@ -217,6 +216,85 @@ func TestServiceDeleteRemovesAssetAndFile(t *testing.T) {
 	err := service.Delete(context.Background(), "asset-1")
 	if err != nil {
 		t.Fatalf("Delete returned error: %v", err)
+	}
+	if repo.softDeletedID != "asset-1" {
+		t.Fatalf("expected soft deleted ID asset-1, got %q", repo.softDeletedID)
+	}
+	if store.deletedPath != "" {
+		t.Fatalf("expected soft delete to skip physical delete, got %q", store.deletedPath)
+	}
+}
+
+func TestServiceDeleteSkipsPhysicalDeleteForSharedFile(t *testing.T) {
+	repo := &fakeRepository{
+		assetByID: map[string]Asset{
+			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg"},
+		},
+	}
+	store := &fakeFileStore{}
+	service := NewService(repo, store)
+
+	err := service.Delete(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatalf("Delete returned error: %v", err)
+	}
+	if repo.softDeletedID != "asset-1" {
+		t.Fatalf("expected soft deleted ID asset-1, got %q", repo.softDeletedID)
+	}
+	if store.deletedPath != "" {
+		t.Fatalf("expected soft delete to skip physical delete, got %q", store.deletedPath)
+	}
+}
+
+func TestServiceDeletePermanentlyMissingFileStillDeletesRecord(t *testing.T) {
+	repo := &fakeRepository{
+		deletedAssetByID: map[string]Asset{
+			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg", DeletedAt: timePointer(time.Now().UTC())},
+		},
+		storagePathCounts: map[string]int{"20260403/photo.jpg": 0},
+	}
+	store := &fakeFileStore{deleteErr: os.ErrNotExist}
+	service := NewService(repo, store)
+
+	err := service.DeletePermanently(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatalf("expected permanent delete to tolerate missing file, got %v", err)
+	}
+	if repo.deletedID != "asset-1" {
+		t.Fatalf("expected deleted ID asset-1, got %q", repo.deletedID)
+	}
+}
+
+func TestServiceRestoreClearsDeletedAsset(t *testing.T) {
+	repo := &fakeRepository{
+		deletedAssetByID: map[string]Asset{
+			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg", DeletedAt: timePointer(time.Now().UTC())},
+		},
+	}
+	service := NewService(repo, &fakeFileStore{})
+
+	err := service.Restore(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+	if repo.restoredID != "asset-1" {
+		t.Fatalf("expected restored ID asset-1, got %q", repo.restoredID)
+	}
+}
+
+func TestServiceDeletePermanentlyRemovesAssetAndFile(t *testing.T) {
+	repo := &fakeRepository{
+		deletedAssetByID: map[string]Asset{
+			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg", DeletedAt: timePointer(time.Now().UTC())},
+		},
+		storagePathCounts: map[string]int{"20260403/photo.jpg": 0},
+	}
+	store := &fakeFileStore{}
+	service := NewService(repo, store)
+
+	err := service.DeletePermanently(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatalf("DeletePermanently returned error: %v", err)
 	}
 	if repo.deletedID != "asset-1" {
 		t.Fatalf("expected deleted ID asset-1, got %q", repo.deletedID)
@@ -226,44 +304,89 @@ func TestServiceDeleteRemovesAssetAndFile(t *testing.T) {
 	}
 }
 
-func TestServiceDeleteSkipsPhysicalDeleteForSharedFile(t *testing.T) {
+func TestServiceDeletePermanentlySkipsPhysicalDeleteForActiveSharedFile(t *testing.T) {
 	repo := &fakeRepository{
-		assetByID: map[string]Asset{
-			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg"},
+		deletedAssetByID: map[string]Asset{
+			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg", DeletedAt: timePointer(time.Now().UTC())},
 		},
-		storagePathCounts: map[string]int{"20260403/photo.jpg": 2},
+		storagePathCounts: map[string]int{"20260403/photo.jpg": 1},
 	}
 	store := &fakeFileStore{}
 	service := NewService(repo, store)
 
-	err := service.Delete(context.Background(), "asset-1")
+	err := service.DeletePermanently(context.Background(), "asset-1")
 	if err != nil {
-		t.Fatalf("Delete returned error: %v", err)
-	}
-	if repo.deletedID != "asset-1" {
-		t.Fatalf("expected deleted ID asset-1, got %q", repo.deletedID)
+		t.Fatalf("DeletePermanently returned error: %v", err)
 	}
 	if store.deletedPath != "" {
 		t.Fatalf("expected shared file to skip physical delete, got %q", store.deletedPath)
 	}
 }
 
-func TestServiceDeleteMissingFileStillDeletesRecord(t *testing.T) {
-	repo := &fakeRepository{
-		assetByID: map[string]Asset{
-			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg"},
-		},
-		storagePathCounts: map[string]int{"20260403/photo.jpg": 1},
-	}
-	store := &fakeFileStore{deleteErr: os.ErrNotExist}
-	service := NewService(repo, store)
+func TestServiceListTrashReturnsDeletedAssets(t *testing.T) {
+	deletedAt := time.Now().UTC()
+	repo := &fakeRepository{trashAssets: []Asset{{ID: "asset-1", DeletedAt: &deletedAt}}}
+	service := NewService(repo, &fakeFileStore{})
 
-	err := service.Delete(context.Background(), "asset-1")
+	assets, err := service.ListTrash(context.Background())
 	if err != nil {
-		t.Fatalf("expected delete to tolerate missing file, got %v", err)
+		t.Fatalf("ListTrash returned error: %v", err)
 	}
-	if repo.deletedID != "asset-1" {
-		t.Fatalf("expected deleted ID asset-1, got %q", repo.deletedID)
+	if len(assets) != 1 || assets[0].ID != "asset-1" {
+		t.Fatalf("expected one trashed asset, got %+v", assets)
+	}
+}
+
+func TestServiceUploadReturnsDecisionForDeletedDuplicate(t *testing.T) {
+	deletedAt := time.Now().UTC()
+	repo := &fakeRepository{deletedAssetByContentHash: map[string]Asset{
+		"3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7": {
+			ID: "asset-deleted", OriginalFilename: "deleted.jpg", ContentHash: "3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7", DeletedAt: &deletedAt,
+		},
+	}}
+	service := NewService(repo, &fakeFileStore{})
+
+	result, err := service.Upload(context.Background(), UploadInput{
+		OriginalFilename: "different-name.jpg",
+		MIMEType:         "image/jpeg",
+		Reader:           strings.NewReader("data"),
+	})
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if !result.RequiresDecision {
+		t.Fatalf("expected upload to require decision, got %+v", result)
+	}
+	if result.DecisionAsset.ID != "asset-deleted" {
+		t.Fatalf("expected decision asset asset-deleted, got %q", result.DecisionAsset.ID)
+	}
+}
+
+func TestServiceUploadRestoresDeletedDuplicateWhenRequested(t *testing.T) {
+	deletedAt := time.Now().UTC()
+	deletedAsset := Asset{ID: "asset-deleted", OriginalFilename: "deleted.jpg", ContentHash: "3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7", DeletedAt: &deletedAt}
+	repo := &fakeRepository{
+		deletedAssetByID: map[string]Asset{"asset-deleted": deletedAsset},
+		deletedAssetByContentHash: map[string]Asset{
+			"3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7": deletedAsset,
+		},
+	}
+	service := NewService(repo, &fakeFileStore{})
+
+	result, err := service.Upload(context.Background(), UploadInput{
+		OriginalFilename: "different-name.jpg",
+		MIMEType:         "image/jpeg",
+		Reader:           strings.NewReader("data"),
+		DuplicateAction:  DuplicateActionRestore,
+	})
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if !result.Restored {
+		t.Fatalf("expected upload to restore deleted duplicate, got %+v", result)
+	}
+	if repo.restoredID != "asset-deleted" {
+		t.Fatalf("expected restored ID asset-deleted, got %q", repo.restoredID)
 	}
 }
 
@@ -280,13 +403,20 @@ type fakeRepository struct {
 	savedAsset                     Asset
 	saveErr                        error
 	assetByID                      map[string]Asset
+	deletedAssetByID               map[string]Asset
 	assetByContentHash             map[string]Asset
+	deletedAssetByContentHash      map[string]Asset
 	assetsWithoutContentHashBySize map[int64][]Asset
 	updatedContentHashes           map[string]string
 	listAssets                     []Asset
+	trashAssets                    []Asset
 	storagePathCounts              map[string]int
+	softDeletedID                  string
+	restoredID                     string
 	deletedID                      string
 	deleteErr                      error
+	restoreErr                     error
+	softDeleteErr                  error
 	countErr                       error
 }
 
@@ -310,8 +440,24 @@ func (f *fakeRepository) FindByID(_ context.Context, id string) (Asset, error) {
 	return asset, nil
 }
 
+func (f *fakeRepository) FindDeletedByID(_ context.Context, id string) (Asset, error) {
+	asset, ok := f.deletedAssetByID[id]
+	if !ok {
+		return Asset{}, ErrNotFound
+	}
+	return asset, nil
+}
+
 func (f *fakeRepository) FindByContentHash(_ context.Context, contentHash string) (Asset, error) {
 	asset, ok := f.assetByContentHash[contentHash]
+	if !ok {
+		return Asset{}, ErrNotFound
+	}
+	return asset, nil
+}
+
+func (f *fakeRepository) FindDeletedByContentHash(_ context.Context, contentHash string) (Asset, error) {
+	asset, ok := f.deletedAssetByContentHash[contentHash]
 	if !ok {
 		return Asset{}, ErrNotFound
 	}
@@ -334,15 +480,68 @@ func (f *fakeRepository) ListRecent(_ context.Context) ([]Asset, error) {
 	return f.listAssets, nil
 }
 
+func (f *fakeRepository) ListTrash(_ context.Context) ([]Asset, error) {
+	return f.trashAssets, nil
+}
+
+func (f *fakeRepository) SoftDelete(_ context.Context, id string, deletedAt time.Time) error {
+	if f.softDeleteErr != nil {
+		return f.softDeleteErr
+	}
+	asset, ok := f.assetByID[id]
+	if !ok {
+		return ErrNotFound
+	}
+	f.softDeletedID = id
+	asset.DeletedAt = &deletedAt
+	delete(f.assetByID, id)
+	if f.deletedAssetByID == nil {
+		f.deletedAssetByID = map[string]Asset{}
+	}
+	f.deletedAssetByID[id] = asset
+	if asset.ContentHash != "" {
+		if f.deletedAssetByContentHash == nil {
+			f.deletedAssetByContentHash = map[string]Asset{}
+		}
+		f.deletedAssetByContentHash[asset.ContentHash] = asset
+	}
+	return nil
+}
+
+func (f *fakeRepository) Restore(_ context.Context, id string) error {
+	if f.restoreErr != nil {
+		return f.restoreErr
+	}
+	asset, ok := f.deletedAssetByID[id]
+	if !ok {
+		return ErrNotFound
+	}
+	f.restoredID = id
+	asset.DeletedAt = nil
+	delete(f.deletedAssetByID, id)
+	if asset.ContentHash != "" {
+		delete(f.deletedAssetByContentHash, asset.ContentHash)
+	}
+	if f.assetByID == nil {
+		f.assetByID = map[string]Asset{}
+	}
+	f.assetByID[id] = asset
+	return nil
+}
+
 func (f *fakeRepository) Delete(_ context.Context, id string) error {
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
-	if _, ok := f.assetByID[id]; !ok {
+	if _, ok := f.deletedAssetByID[id]; !ok {
 		return ErrNotFound
 	}
 	f.deletedID = id
-	delete(f.assetByID, id)
+	asset := f.deletedAssetByID[id]
+	delete(f.deletedAssetByID, id)
+	if asset.ContentHash != "" {
+		delete(f.deletedAssetByContentHash, asset.ContentHash)
+	}
 	return nil
 }
 
@@ -396,12 +595,20 @@ func (d *duplicateOnSaveRepository) FindByID(_ context.Context, _ string) (Asset
 	return Asset{}, ErrNotFound
 }
 
+func (d *duplicateOnSaveRepository) FindDeletedByID(_ context.Context, _ string) (Asset, error) {
+	return Asset{}, ErrNotFound
+}
+
 func (d *duplicateOnSaveRepository) FindByContentHash(_ context.Context, _ string) (Asset, error) {
 	d.findCalls++
 	if d.findCalls == 1 {
 		return Asset{}, ErrNotFound
 	}
 	return d.existingAsset, nil
+}
+
+func (d *duplicateOnSaveRepository) FindDeletedByContentHash(_ context.Context, _ string) (Asset, error) {
+	return Asset{}, ErrNotFound
 }
 
 func (d *duplicateOnSaveRepository) FindWithoutContentHashBySize(_ context.Context, _ int64) ([]Asset, error) {
@@ -414,6 +621,18 @@ func (d *duplicateOnSaveRepository) UpdateContentHash(_ context.Context, _ strin
 
 func (d *duplicateOnSaveRepository) ListRecent(_ context.Context) ([]Asset, error) {
 	return nil, nil
+}
+
+func (d *duplicateOnSaveRepository) ListTrash(_ context.Context) ([]Asset, error) {
+	return nil, nil
+}
+
+func (d *duplicateOnSaveRepository) SoftDelete(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
+
+func (d *duplicateOnSaveRepository) Restore(_ context.Context, _ string) error {
+	return nil
 }
 
 func (d *duplicateOnSaveRepository) Delete(_ context.Context, _ string) error {
@@ -430,4 +649,8 @@ type readSeekNopCloser struct {
 
 func (r readSeekNopCloser) Close() error {
 	return nil
+}
+
+func timePointer(value time.Time) *time.Time {
+	return &value
 }

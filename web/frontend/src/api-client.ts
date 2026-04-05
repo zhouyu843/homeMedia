@@ -14,7 +14,10 @@ export type ApiAsset = {
 export type UploadResponse = {
   asset: ApiAsset;
   existing: boolean;
+  restored?: boolean;
 };
+
+export type UploadDuplicateAction = "restore" | "new";
 
 export type UploadConfig = {
   csrfToken: string;
@@ -25,6 +28,7 @@ export type UploadConfig = {
 
 type UploadError = Error & {
   code?: string;
+  asset?: ApiAsset;
 };
 
 export function parseUploadConfig(root: HTMLElement): UploadConfig {
@@ -49,11 +53,15 @@ export function parseUploadConfig(root: HTMLElement): UploadConfig {
 export async function uploadFile(
   config: UploadConfig,
   file: File,
-  onProgress: (progress: number) => void
+  onProgress: (progress: number) => void,
+  duplicateAction?: UploadDuplicateAction
 ): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("csrf_token", config.csrfToken);
+  if (duplicateAction) {
+    formData.append("trashed_duplicate_action", duplicateAction);
+  }
 
   return new Promise<UploadResponse>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -68,22 +76,23 @@ export async function uploadFile(
     };
 
     xhr.onerror = () => {
-      reject(withCode(new Error("network error"), "network_error"));
+      reject(withDetails(new Error("network error"), "network_error"));
     };
 
     xhr.onload = () => {
-      const response = xhr.response as { asset?: ApiAsset; existing?: boolean; code?: string; message?: string } | null;
+      const response = xhr.response as { asset?: ApiAsset; existing?: boolean; restored?: boolean; code?: string; message?: string } | null;
       if (xhr.status >= 200 && xhr.status < 300 && response?.asset) {
         onProgress(100);
         resolve({
           asset: response.asset,
-          existing: response.existing === true
+          existing: response.existing === true,
+          restored: response.restored === true
         });
         return;
       }
 
       const message = response?.message ?? `upload failed with status ${xhr.status}`;
-      reject(withCode(new Error(message), response?.code ?? "upload_failed"));
+      reject(withDetails(new Error(message), response?.code ?? "upload_failed", response?.asset));
     };
 
     xhr.send(formData);
@@ -114,8 +123,9 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
-function withCode(error: Error, code: string): UploadError {
+function withDetails(error: Error, code: string, asset?: ApiAsset): UploadError {
   const uploadError = error as UploadError;
   uploadError.code = code;
+  uploadError.asset = asset;
   return uploadError;
 }

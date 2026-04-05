@@ -20,10 +20,14 @@ import (
 type MediaService interface {
 	Upload(ctx context.Context, input media.UploadInput) (media.UploadResult, error)
 	List(ctx context.Context) ([]media.Asset, error)
+	ListTrash(ctx context.Context) ([]media.Asset, error)
 	Get(ctx context.Context, id string) (media.Asset, error)
 	Download(ctx context.Context, id string) (media.Asset, io.ReadSeekCloser, error)
 	Thumbnail(ctx context.Context, id string) (string, []byte, error)
 	Delete(ctx context.Context, id string) error
+	Restore(ctx context.Context, id string) error
+	DeletePermanently(ctx context.Context, id string) error
+	EmptyTrash(ctx context.Context) error
 }
 
 type Handler struct {
@@ -118,6 +122,28 @@ func (h Handler) ListMedia(c *gin.Context) {
 	}
 }
 
+func (h Handler) ListTrash(c *gin.Context) {
+	assets, err := h.service.ListTrash(c.Request.Context())
+	if err != nil {
+		c.String(http.StatusInternalServerError, "list trash failed")
+		return
+	}
+
+	csrfToken, ok := h.auth.SessionCSRFToken(c.Request)
+	if !ok {
+		c.String(http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	c.Status(http.StatusOK)
+	if err := h.templates.ExecuteTemplate(c.Writer, "trash.html", gin.H{
+		"Assets":     assets,
+		"CSRFToken": csrfToken,
+	}); err != nil {
+		c.String(http.StatusInternalServerError, "render trash failed")
+	}
+}
+
 func (h Handler) ListMediaJSON(c *gin.Context) {
 	assets, err := h.service.List(c.Request.Context())
 	if err != nil {
@@ -173,7 +199,7 @@ func (h Handler) UploadMedia(c *gin.Context) {
 		return
 	}
 
-	result, err := h.uploadFromHeader(c, fileHeader)
+	result, err := h.uploadFromHeader(c, fileHeader, media.DuplicateActionNew)
 	if err != nil {
 		h.writeMediaError(c, err)
 		return
@@ -200,20 +226,32 @@ func (h Handler) UploadMediaJSON(c *gin.Context) {
 		return
 	}
 
-	result, err := h.uploadFromHeader(c, fileHeader)
+	result, err := h.uploadFromHeader(c, fileHeader, h.uploadDuplicateAction(c))
 	if err != nil {
 		h.writeMediaErrorJSON(c, err)
+		return
+	}
+
+	if result.RequiresDecision {
+		c.JSON(http.StatusConflict, gin.H{
+			"code":    "trashed_duplicate",
+			"message": "发现回收站中的同内容文件，请选择恢复旧项或继续新建",
+			"asset":   toMediaAssetResponse(result.DecisionAsset),
+		})
 		return
 	}
 
 	status := http.StatusCreated
 	if result.Existing {
 		status = http.StatusOK
+	} else if result.Restored {
+		status = http.StatusOK
 	}
 
 	c.JSON(status, gin.H{
 		"asset":    toMediaAssetResponse(result.Asset),
 		"existing": result.Existing,
+		"restored": result.Restored,
 	})
 }
 
@@ -229,6 +267,53 @@ func (h Handler) DeleteMedia(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusSeeOther, "/media")
+}
+
+func (h Handler) RestoreMedia(c *gin.Context) {
+	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
+		c.String(http.StatusForbidden, "invalid csrf token")
+		return
+	}
+
+	if err := h.service.Restore(c.Request.Context(), c.Param("id")); err != nil {
+		h.writeMediaError(c, err)
+		return
+	}
+
+	if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+
+	c.Redirect(http.StatusSeeOther, "/trash")
+}
+
+func (h Handler) DeleteMediaPermanently(c *gin.Context) {
+	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
+		c.String(http.StatusForbidden, "invalid csrf token")
+		return
+	}
+
+	if err := h.service.DeletePermanently(c.Request.Context(), c.Param("id")); err != nil {
+		h.writeMediaError(c, err)
+		return
+	}
+
+	c.Redirect(http.StatusSeeOther, "/trash")
+}
+
+func (h Handler) EmptyTrash(c *gin.Context) {
+	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
+		c.String(http.StatusForbidden, "invalid csrf token")
+		return
+	}
+
+	if err := h.service.EmptyTrash(c.Request.Context()); err != nil {
+		h.writeMediaError(c, err)
+		return
+	}
+
+	c.Redirect(http.StatusSeeOther, "/trash")
 }
 
 func (h Handler) renderLogin(c *gin.Context, status int, errMsg string) {
@@ -293,7 +378,7 @@ func placeholderThumbnailSVG() []byte {
 	return []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 270" role="img" aria-label="preview unavailable"><rect width="360" height="270" fill="#e2e8f0"/><rect x="24" y="24" width="312" height="222" rx="16" fill="#cbd5e1"/><text x="180" y="146" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#475569" letter-spacing="2">PREVIEW</text></svg>`)
 }
 
-func (h Handler) uploadFromHeader(c *gin.Context, fileHeader *multipart.FileHeader) (media.UploadResult, error) {
+func (h Handler) uploadFromHeader(c *gin.Context, fileHeader *multipart.FileHeader, duplicateAction media.DuplicateAction) (media.UploadResult, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
 		return media.UploadResult{}, err
@@ -315,6 +400,7 @@ func (h Handler) uploadFromHeader(c *gin.Context, fileHeader *multipart.FileHead
 		MIMEType:         http.DetectContentType(buffer[:bytesRead]),
 		SizeBytes:        fileHeader.Size,
 		Reader:           file,
+		DuplicateAction:  duplicateAction,
 	})
 	if err != nil {
 		return media.UploadResult{}, err
@@ -327,6 +413,8 @@ func (h Handler) writeMediaError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, media.ErrUnsupportedMediaType):
 		c.String(http.StatusUnsupportedMediaType, err.Error())
+	case errors.Is(err, media.ErrDuplicateContentHash):
+		c.String(http.StatusConflict, err.Error())
 	case errors.Is(err, media.ErrNotFound), errors.Is(err, media.ErrFileMissing):
 		c.String(http.StatusNotFound, err.Error())
 	case errors.Is(err, media.ErrInvalidStoragePath):
@@ -342,6 +430,8 @@ func (h Handler) writeMediaErrorJSON(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, media.ErrUnsupportedMediaType):
 		c.JSON(http.StatusUnsupportedMediaType, apiErrorResponse{Code: "unsupported_media_type", Message: err.Error()})
+	case errors.Is(err, media.ErrDuplicateContentHash):
+		c.JSON(http.StatusConflict, apiErrorResponse{Code: "duplicate_content_hash", Message: err.Error()})
 	case errors.Is(err, media.ErrNotFound), errors.Is(err, media.ErrFileMissing):
 		c.JSON(http.StatusNotFound, apiErrorResponse{Code: "not_found", Message: err.Error()})
 	case errors.Is(err, media.ErrInvalidStoragePath):
@@ -359,6 +449,14 @@ func (h Handler) uploadCSRFToken(c *gin.Context) string {
 		return token
 	}
 	return c.PostForm("csrf_token")
+}
+
+func (h Handler) uploadDuplicateAction(c *gin.Context) media.DuplicateAction {
+	action := media.DuplicateAction(c.PostForm("trashed_duplicate_action"))
+	if action == media.DuplicateActionRestore || action == media.DuplicateActionNew {
+		return action
+	}
+	return media.DuplicateActionPrompt
 }
 
 type apiErrorResponse struct {

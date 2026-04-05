@@ -3,6 +3,8 @@ package http
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -475,8 +477,8 @@ func TestDeleteMediaRemovesAssetAndRedirects(t *testing.T) {
 	if got := resp.Header().Get("Location"); got != "/media" {
 		t.Fatalf("expected redirect to /media, got %q", got)
 	}
-	if _, err := store.Open(storedFile.StoragePath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected physical file to be deleted, got %v", err)
+	if _, err := store.Open(storedFile.StoragePath); err != nil {
+		t.Fatalf("expected soft-deleted file to remain on disk, got %v", err)
 	}
 
 	detailResp := httptest.NewRecorder()
@@ -485,6 +487,17 @@ func TestDeleteMediaRemovesAssetAndRedirects(t *testing.T) {
 	router.ServeHTTP(detailResp, detailReq)
 	if detailResp.Code != http.StatusNotFound {
 		t.Fatalf("expected deleted detail status 404, got %d", detailResp.Code)
+	}
+
+	trashResp := httptest.NewRecorder()
+	trashReq := httptest.NewRequest(http.MethodGet, "/trash", nil)
+	trashReq.AddCookie(sessionCookie)
+	router.ServeHTTP(trashResp, trashReq)
+	if trashResp.Code != http.StatusOK {
+		t.Fatalf("expected trash status 200, got %d", trashResp.Code)
+	}
+	if !strings.Contains(trashResp.Body.String(), "photo.jpg") {
+		t.Fatalf("expected trashed asset to appear in trash page, got %q", trashResp.Body.String())
 	}
 }
 
@@ -552,6 +565,154 @@ func TestDeleteMediaKeepsSharedFileForRemainingAsset(t *testing.T) {
 	router.ServeHTTP(downloadResp, downloadReq)
 	if downloadResp.Code != http.StatusOK {
 		t.Fatalf("expected remaining asset download status 200, got %d", downloadResp.Code)
+	}
+}
+
+func TestRestoreMediaRestoresAssetAndRedirects(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	storedFile, err := store.Save(context.Background(), "photo.jpg", bytes.NewReader([]byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}))
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	now := time.Now().UTC().Add(-time.Minute)
+	deletedAt := time.Now().UTC()
+	repo.assets = []media.Asset{{
+		ID:               "asset-1",
+		OriginalFilename: "photo.jpg",
+		StoredFilename:   storedFile.StoredFilename,
+		MediaType:        media.MediaTypeImage,
+		MIMEType:         "image/jpeg",
+		SizeBytes:        7,
+		StoragePath:      storedFile.StoragePath,
+		CreatedAt:        now,
+		DeletedAt:        &deletedAt,
+	}}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	csrfToken := getPageCSRFToken(t, router, "/trash", sessionCookie)
+
+	form := url.Values{}
+	form.Set("csrf_token", csrfToken)
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/media/asset-1/restore", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(sessionCookie)
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusSeeOther {
+		t.Fatalf("expected status 303, got %d with body %q", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Location"); got != "/trash" {
+		t.Fatalf("expected redirect to /trash, got %q", got)
+	}
+
+	detailResp := httptest.NewRecorder()
+	detailReq := httptest.NewRequest(http.MethodGet, "/media/asset-1", nil)
+	detailReq.AddCookie(sessionCookie)
+	router.ServeHTTP(detailResp, detailReq)
+	if detailResp.Code != http.StatusOK {
+		t.Fatalf("expected restored detail status 200, got %d", detailResp.Code)
+	}
+}
+
+func TestPermanentDeleteRemovesAssetAndFile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	storedFile, err := store.Save(context.Background(), "photo.jpg", bytes.NewReader([]byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}))
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	deletedAt := time.Now().UTC()
+	repo.assets = []media.Asset{{
+		ID:               "asset-1",
+		OriginalFilename: "photo.jpg",
+		StoredFilename:   storedFile.StoredFilename,
+		MediaType:        media.MediaTypeImage,
+		MIMEType:         "image/jpeg",
+		SizeBytes:        7,
+		StoragePath:      storedFile.StoragePath,
+		CreatedAt:        time.Now().UTC().Add(-time.Minute),
+		DeletedAt:        &deletedAt,
+	}}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	csrfToken := getPageCSRFToken(t, router, "/trash", sessionCookie)
+
+	form := url.Values{}
+	form.Set("csrf_token", csrfToken)
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/media/asset-1/permanent-delete", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(sessionCookie)
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusSeeOther {
+		t.Fatalf("expected status 303, got %d with body %q", resp.Code, resp.Body.String())
+	}
+	if _, err := store.Open(storedFile.StoragePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected physical file to be deleted, got %v", err)
+	}
+}
+
+func TestUploadMediaJSONReturnsConflictForDeletedDuplicate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}
+	hash := sha256.Sum256(body)
+
+	repo := &memoryRepository{assets: []media.Asset{{
+		ID:               "asset-deleted",
+		OriginalFilename: "photo.jpg",
+		StoredFilename:   "photo.jpg",
+		MediaType:        media.MediaTypeImage,
+		MIMEType:         "image/jpeg",
+		SizeBytes:        7,
+		ContentHash:      hex.EncodeToString(hash[:]),
+		StoragePath:      "20260403/photo.jpg",
+		CreatedAt:        time.Now().UTC().Add(-time.Minute),
+		DeletedAt:        timePointer(time.Now().UTC()),
+	}}}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	uploadCSRFToken := getPageCSRFToken(t, router, "/media", sessionCookie)
+
+	req := newUploadRequest(t, "file", "photo-copy.jpg", body, map[string]string{"csrf_token": uploadCSRFToken})
+	req.URL.Path = "/api/uploads"
+	req.Header.Set("X-CSRF-Token", uploadCSRFToken)
+	req.AddCookie(sessionCookie)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d with body %q", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "trashed_duplicate") {
+		t.Fatalf("expected conflict response code, got %q", resp.Body.String())
 	}
 }
 
@@ -729,6 +890,7 @@ func testTemplates(t *testing.T) *template.Template {
 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
 <input id="file" name="file" type="file" required>
 </form>
+<a href="/trash">回收站</a>
 {{range .Assets}}
 <a href="/media/{{.ID}}">{{.OriginalFilename}}</a>
 <form action="/media/{{.ID}}/delete" method="post"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"></form>
@@ -741,6 +903,14 @@ func testTemplates(t *testing.T) *template.Template {
 <a href="/media/{{.Asset.ID}}/download">download</a>
 <form action="/media/{{.Asset.ID}}/delete" method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
 <form action="/logout" method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
+{{end}}
+{{define "trash.html"}}
+{{range .Assets}}
+<span>{{.OriginalFilename}}</span>
+<form action="/media/{{.ID}}/restore" method="post"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"></form>
+<form action="/media/{{.ID}}/permanent-delete" method="post"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"></form>
+{{end}}
+<form action="/trash/empty" method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
 {{end}}
 {{define "login.html"}}
 {{if .Error}}<p>{{.Error}}</p>{{end}}
@@ -867,7 +1037,18 @@ func (m *memoryRepository) FindByID(_ context.Context, id string) (media.Asset, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, asset := range m.assets {
-		if asset.ID == id {
+		if asset.ID == id && asset.DeletedAt == nil {
+			return asset, nil
+		}
+	}
+	return media.Asset{}, media.ErrNotFound
+}
+
+func (m *memoryRepository) FindDeletedByID(_ context.Context, id string) (media.Asset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, asset := range m.assets {
+		if asset.ID == id && asset.DeletedAt != nil {
 			return asset, nil
 		}
 	}
@@ -878,7 +1059,18 @@ func (m *memoryRepository) FindByContentHash(_ context.Context, contentHash stri
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, asset := range m.assets {
-		if asset.ContentHash == contentHash {
+		if asset.ContentHash == contentHash && asset.DeletedAt == nil {
+			return asset, nil
+		}
+	}
+	return media.Asset{}, media.ErrNotFound
+}
+
+func (m *memoryRepository) FindDeletedByContentHash(_ context.Context, contentHash string) (media.Asset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, asset := range m.assets {
+		if asset.ContentHash == contentHash && asset.DeletedAt != nil {
 			return asset, nil
 		}
 	}
@@ -890,7 +1082,7 @@ func (m *memoryRepository) FindWithoutContentHashBySize(_ context.Context, sizeB
 	defer m.mu.Unlock()
 	var assets []media.Asset
 	for _, asset := range m.assets {
-		if asset.ContentHash == "" && asset.SizeBytes == sizeBytes {
+		if asset.ContentHash == "" && asset.SizeBytes == sizeBytes && asset.DeletedAt == nil {
 			assets = append(assets, asset)
 		}
 	}
@@ -913,14 +1105,63 @@ func (m *memoryRepository) UpdateContentHash(_ context.Context, id string, conte
 func (m *memoryRepository) ListRecent(_ context.Context) ([]media.Asset, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.assets, nil
+	assets := make([]media.Asset, 0, len(m.assets))
+	for _, asset := range m.assets {
+		if asset.DeletedAt == nil {
+			assets = append(assets, asset)
+		}
+	}
+	return assets, nil
+}
+
+func (m *memoryRepository) ListTrash(_ context.Context) ([]media.Asset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	assets := make([]media.Asset, 0, len(m.assets))
+	for _, asset := range m.assets {
+		if asset.DeletedAt != nil {
+			assets = append(assets, asset)
+		}
+	}
+	return assets, nil
+}
+
+func (m *memoryRepository) SoftDelete(_ context.Context, id string, deletedAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for index, asset := range m.assets {
+		if asset.ID == id && asset.DeletedAt == nil {
+			asset.DeletedAt = &deletedAt
+			m.assets[index] = asset
+			return nil
+		}
+	}
+	return media.ErrNotFound
+}
+
+func (m *memoryRepository) Restore(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for index, asset := range m.assets {
+		if asset.ID == id && asset.DeletedAt != nil {
+			for _, active := range m.assets {
+				if active.DeletedAt == nil && active.ContentHash != "" && active.ContentHash == asset.ContentHash {
+					return media.ErrDuplicateContentHash
+				}
+			}
+			asset.DeletedAt = nil
+			m.assets[index] = asset
+			return nil
+		}
+	}
+	return media.ErrNotFound
 }
 
 func (m *memoryRepository) Delete(_ context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for index, asset := range m.assets {
-		if asset.ID == id {
+		if asset.ID == id && asset.DeletedAt != nil {
 			m.assets = append(m.assets[:index], m.assets[index+1:]...)
 			return nil
 		}
@@ -933,7 +1174,7 @@ func (m *memoryRepository) CountByStoragePath(_ context.Context, storagePath str
 	defer m.mu.Unlock()
 	count := 0
 	for _, asset := range m.assets {
-		if asset.StoragePath == storagePath {
+		if asset.StoragePath == storagePath && asset.DeletedAt == nil {
 			count++
 		}
 	}
@@ -952,4 +1193,8 @@ func (brokenStore) Open(_ string) (io.ReadSeekCloser, error) {
 
 func (brokenStore) Delete(_ string) error {
 	return nil
+}
+
+func timePointer(value time.Time) *time.Time {
+	return &value
 }

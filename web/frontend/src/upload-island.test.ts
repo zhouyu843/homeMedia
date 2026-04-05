@@ -129,6 +129,38 @@ describe("UploadIslandApp", () => {
     expect(uploadFileMock).toHaveBeenCalledTimes(2);
   });
 
+  it("offers restore choice for trashed duplicate uploads", async () => {
+    const duplicateError = Object.assign(new Error("发现回收站中的同内容文件，请选择恢复旧项或继续新建"), {
+      code: "trashed_duplicate",
+      asset: makeAsset({ id: "asset-deleted", detailUrl: "/media/asset-deleted" })
+    });
+    uploadFileMock.mockRejectedValueOnce(duplicateError);
+    uploadFileMock.mockResolvedValueOnce({
+      asset: makeAsset({ id: "asset-deleted", detailUrl: "/media/asset-deleted" }),
+      existing: false,
+      restored: true
+    });
+
+    const { container } = render(React.createElement(UploadIslandApp, { config: makeConfig() }));
+
+    const input = screen.getByLabelText("选择要上传的文件") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeFile("restore.jpg")] } });
+    fireEvent.click(screen.getByRole("button", { name: "上传待处理文件 (1)" }));
+
+    await screen.findByRole("button", { name: "恢复旧项" });
+    expect(screen.getByRole("button", { name: "继续新建" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复旧项" }));
+
+    await waitFor(() => {
+      expect(container.querySelector("li strong")).toBeNull();
+    });
+
+    expect(uploadFileMock).toHaveBeenNthCalledWith(2, expect.anything(), expect.any(File), expect.any(Function), "restore");
+    expect(screen.getByText("最近上传结果")).toBeTruthy();
+    expect(within(screen.getByText("最近上传结果").closest("div") as HTMLElement).getAllByText("restore.jpg").length).toBeGreaterThan(0);
+  });
+
   it("accepts file drop from the whole page", async () => {
     render(React.createElement(UploadIslandApp, { config: makeConfig() }));
 

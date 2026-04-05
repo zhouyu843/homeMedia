@@ -55,6 +55,24 @@ func (s Service) Upload(ctx context.Context, input UploadInput) (UploadResult, e
 		return UploadResult{}, err
 	}
 
+	trashedAsset, err := s.repository.FindDeletedByContentHash(ctx, contentHash)
+	if err == nil {
+		switch input.DuplicateAction {
+		case DuplicateActionRestore:
+			if err := s.repository.Restore(ctx, trashedAsset.ID); err != nil {
+				return UploadResult{}, err
+			}
+			restoredAsset := trashedAsset
+			restoredAsset.DeletedAt = nil
+			return UploadResult{Asset: restoredAsset, Restored: true}, nil
+		case DuplicateActionPrompt:
+			return UploadResult{RequiresDecision: true, DecisionAsset: trashedAsset}, nil
+		}
+	}
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return UploadResult{}, err
+	}
+
 	legacyAsset, err := s.findLegacyAssetByContentHash(ctx, contentHash, sizeBytes)
 	if err != nil {
 		return UploadResult{}, err
@@ -106,6 +124,10 @@ func (s Service) List(ctx context.Context) ([]Asset, error) {
 	return s.repository.ListRecent(ctx)
 }
 
+func (s Service) ListTrash(ctx context.Context) ([]Asset, error) {
+	return s.repository.ListTrash(ctx)
+}
+
 func (s Service) Get(ctx context.Context, id string) (Asset, error) {
 	return s.repository.FindByID(ctx, id)
 }
@@ -131,7 +153,24 @@ func (s Service) Download(ctx context.Context, id string) (Asset, io.ReadSeekClo
 }
 
 func (s Service) Delete(ctx context.Context, id string) error {
-	asset, err := s.repository.FindByID(ctx, id)
+	if _, err := s.repository.FindByID(ctx, id); err != nil {
+		return err
+	}
+
+	deletedAt := s.now().UTC()
+	return s.repository.SoftDelete(ctx, id, deletedAt)
+}
+
+func (s Service) Restore(ctx context.Context, id string) error {
+	if _, err := s.repository.FindDeletedByID(ctx, id); err != nil {
+		return err
+	}
+
+	return s.repository.Restore(ctx, id)
+}
+
+func (s Service) DeletePermanently(ctx context.Context, id string) error {
+	asset, err := s.repository.FindDeletedByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -145,12 +184,27 @@ func (s Service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 
-	if storagePathRefCount > 1 {
+	if storagePathRefCount > 0 {
 		return nil
 	}
 
 	if err := s.fileStore.Delete(asset.StoragePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
+	}
+
+	return nil
+}
+
+func (s Service) EmptyTrash(ctx context.Context) error {
+	assets, err := s.repository.ListTrash(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, asset := range assets {
+		if err := s.DeletePermanently(ctx, asset.ID); err != nil {
+			return err
+		}
 	}
 
 	return nil

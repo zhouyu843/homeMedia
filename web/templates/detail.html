@@ -82,10 +82,13 @@
     <div class="shell">
         <header class="topbar">
             <a href="/media">返回列表</a>
-            <form action="/logout" method="post">
-                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-                <button class="btn" type="submit">退出登录</button>
-            </form>
+            <div style="display:flex; align-items:center; gap:0.75rem;">
+                <a href="/trash">回收站</a>
+                <form action="/logout" method="post">
+                    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                    <button class="btn" type="submit">退出登录</button>
+                </form>
+            </div>
         </header>
 
         <section class="panel">
@@ -116,9 +119,9 @@
         <section class="panel">
             <div class="actions">
                 <a class="download" href="/media/{{.Asset.ID}}/download">下载原文件</a>
-                <form class="delete-form" action="/media/{{.Asset.ID}}/delete" method="post" onsubmit="return confirm('确定直接删除这个媒体吗？删除后不可恢复。');">
+                <form class="delete-form" action="/media/{{.Asset.ID}}/delete" method="post" onsubmit="return confirm('确定将这个媒体移入回收站吗？之后仍可恢复。');">
                     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-                    <button class="btn btn-danger" type="submit">删除媒体</button>
+                    <button class="btn btn-danger" type="submit">移入回收站</button>
                 </form>
             </div>
         </section>

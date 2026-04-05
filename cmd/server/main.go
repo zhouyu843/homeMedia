@@ -77,6 +77,10 @@ func (a serviceAdapter) List(ctx context.Context) ([]media.Asset, error) {
 	return a.service.List(ctx)
 }
 
+func (a serviceAdapter) ListTrash(ctx context.Context) ([]media.Asset, error) {
+	return a.service.ListTrash(ctx)
+}
+
 func (a serviceAdapter) Get(ctx context.Context, id string) (media.Asset, error) {
 	return a.service.Get(ctx, id)
 }
@@ -91,4 +95,16 @@ func (a serviceAdapter) Thumbnail(ctx context.Context, id string) (string, []byt
 
 func (a serviceAdapter) Delete(ctx context.Context, id string) error {
 	return a.service.Delete(ctx, id)
+}
+
+func (a serviceAdapter) Restore(ctx context.Context, id string) error {
+	return a.service.Restore(ctx, id)
+}
+
+func (a serviceAdapter) DeletePermanently(ctx context.Context, id string) error {
+	return a.service.DeletePermanently(ctx, id)
+}
+
+func (a serviceAdapter) EmptyTrash(ctx context.Context) error {
+	return a.service.EmptyTrash(ctx)
 }

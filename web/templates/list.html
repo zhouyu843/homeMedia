@@ -41,6 +41,17 @@
             justify-content: space-between;
             gap: 1rem;
         }
+        .topbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .topbar-link {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.95rem;
+        }
+        .topbar-link:hover { text-decoration: underline; }
         h1 {
             margin: 0;
             font-size: clamp(1.5rem, 1.3rem + 0.8vw, 2rem);
@@ -184,10 +195,13 @@
     <div class="shell">
         <header class="topbar">
             <h1>媒体库</h1>
-            <form class="logout-form" action="/logout" method="post">
-                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-                <button class="btn" type="submit">退出登录</button>
-            </form>
+            <div class="topbar-actions">
+                <a class="topbar-link" href="/trash">回收站</a>
+                <form class="logout-form" action="/logout" method="post">
+                    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                    <button class="btn" type="submit">退出登录</button>
+                </form>
+            </div>
         </header>
 
         <form class="upload" action="/uploads" method="post" enctype="multipart/form-data">
@@ -208,9 +222,9 @@
         <section class="gallery">
             {{range .Assets}}
             <article class="card">
-                <form class="card-delete" action="/media/{{.ID}}/delete" method="post" onsubmit="return confirm('确定直接删除这个媒体吗？删除后不可恢复。');">
+                <form class="card-delete" action="/media/{{.ID}}/delete" method="post" onsubmit="return confirm('确定将这个媒体移入回收站吗？之后仍可恢复。');">
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <button type="submit">删除</button>
+                    <button type="submit">回收</button>
                 </form>
                 <a class="card-link" href="/media/{{.ID}}">
                     <figure class="thumb-wrap">
