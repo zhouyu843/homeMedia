@@ -52,6 +52,7 @@ services:
       - ./data/uploads:/data/uploads
     ports:
       - "${APP_PORT:-8080}:8080"
+      - "5173:5173"
     depends_on:
       postgres:
         condition: service_healthy

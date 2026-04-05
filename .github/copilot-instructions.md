@@ -9,12 +9,14 @@
 - After changing behavior, commands, setup, routes, configuration, or project structure, update README.md in the same task.
 - Use Docker Compose to run project commands whenever possible. Do not assume the host machine has a usable Go toolchain.
 - Prefer small, end-to-end deliverables that keep the MVP working at each step.
+- React + TypeScript changes should be implemented as incremental islands inside existing SSR pages unless the task explicitly requires full SPA migration.
 
 ## Build And Test
 - Use TDD pragmatically: write or update tests first for critical behavior changes, then implement.
 - Prioritize tests around upload, list, detail, download, file-type validation, missing-file handling, and path safety.
 - Prefer running commands through the app container, for example `docker compose run --rm app go test ./...`.
 - If formatting is needed, use the containerized toolchain, for example `docker compose run --rm app sh -c 'gofmt -w ./cmd ./internal'`.
+- For frontend changes, use containerized commands from `web/frontend` (for example `npm run build` or `npm run test`) through Docker Compose.
 
 ## Architecture
 - Keep the project as a small monolith. Do not introduce microservices, CQRS, event sourcing, or heavy abstraction.
@@ -22,9 +24,14 @@
 - Treat PostgreSQL as metadata storage only. Store original media files in the mounted local directory.
 - Keep boundaries clear between HTTP, domain logic, repository, and local file storage, but avoid academic layering.
 - Prefer Gin, PostgreSQL, local storage, and Docker Compose unless there is a strong reason to change.
+- Keep Go as the single runtime entrypoint. Frontend assets are built from `web/frontend` and served by Gin from `web/static`.
+- Keep auth/session/CSRF authority on the Go side. React islands consume those capabilities; they should not replace the auth model.
+- Prefer explicit `/api/` JSON endpoints for frontend interactions instead of mixing long-term HTML and JSON semantics in one route.
 
 ## Conventions
 - Favor MVP-first decisions. Do not add AI features, search, sharing, object storage, background workers, or complex auth unless explicitly requested.
 - When adding abstractions, require a real current need, not a hypothetical future use case.
 - Keep README.md, docker-compose.yml, migrations, and environment examples aligned with implementation.
 - Preserve safe path handling for local file access and download behavior.
+- Keep React islands scoped and single-purpose (for example upload panel enhancements) to avoid state and routing sprawl.
+- Keep frontend API calls in a dedicated client layer instead of embedding request details directly in UI components.

@@ -167,6 +167,7 @@
             <input id="file" name="file" type="file" required>
             <button type="submit">上传</button>
         </form>
+        <div id="upload-island-root"></div>
 
         {{if .Assets}}
         <section class="gallery">
@@ -188,5 +189,6 @@
         <p class="empty">还没有上传任何媒体。</p>
         {{end}}
     </div>
+    <script type="module" src="/static/react/upload-island.js"></script>
 </body>
 </html>

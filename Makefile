@@ -12,3 +12,15 @@ down:
 
 migrate:
 	docker compose run --rm migrate
+
+frontend-install:
+	docker compose run --rm app sh -lc 'cd web/frontend && npm install'
+
+frontend-build:
+	docker compose run --rm app sh -lc 'cd web/frontend && npm run build'
+
+frontend-dev:
+	docker compose run --rm --service-ports app sh -lc 'cd web/frontend && npm run dev'
+
+frontend-test:
+	docker compose run --rm app sh -lc 'cd web/frontend && npm run test'

@@ -12,6 +12,7 @@ func NewRouter(handler Handler) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), SecurityHeadersMiddleware())
 	router.SetHTMLTemplate(template.Must(handler.templates.Clone()))
+	router.Static("/static", "./web/static")
 
 	loginLimiter := NewIPRateLimiter(rate.Every(6*time.Second), 5)
 	uploadLimiter := NewIPRateLimiter(rate.Every(2*time.Second), 10)

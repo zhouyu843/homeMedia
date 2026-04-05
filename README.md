@@ -29,6 +29,8 @@
 - PostgreSQL 16
 - 本地文件存储
 - Docker Compose
+- React 18（局部交互岛屿）
+- TypeScript + Vite（前端子工程构建）
 
 ## 目录说明
 
@@ -40,6 +42,8 @@
 - `internal/storage/local`：本地文件存储实现
 - `migrations`：数据库迁移脚本
 - `web/templates`：服务端渲染页面
+- `web/frontend`：React + TypeScript 前端子工程（上传交互增强）
+- `web/static`：Gin 托管的静态资源（包含前端构建产物）
 
 ## 快速开始
 
@@ -69,6 +73,15 @@ http://127.0.0.1:8080/login
 
 5. 使用 `.env` 中的管理员账号密码登录。
 
+6. （可选）构建 React 岛屿前端资源：
+
+```bash
+make frontend-install
+make frontend-build
+```
+
+说明：列表页会尝试加载 `/static/react/upload-island.js`。如果未执行前端构建，核心 SSR 功能仍可用，但上传区 React 增强不会生效。
+
 ## 环境变量
 
 基础运行配置：
@@ -88,6 +101,30 @@ http://127.0.0.1:8080/login
 
 ```bash
 docker compose run --rm app go test ./...
+```
+
+运行前端测试：
+
+```bash
+make frontend-test
+```
+
+安装前端依赖：
+
+```bash
+make frontend-install
+```
+
+构建前端资源：
+
+```bash
+make frontend-build
+```
+
+启动前端开发服务器（容器内）：
+
+```bash
+make frontend-dev
 ```
 
 格式化代码：
@@ -129,6 +166,11 @@ docker compose down
 - 搜索、标签、相册
 - 分享链接
 - 异步任务系统
+
+前端集成边界（当前阶段）：
+- 仍以 Go + SSR 为主体，不做整站 SPA。
+- React 仅用于高交互区域（当前从列表页上传区开始）。
+- 会话认证、CSRF、防刷限流仍由后端负责。
 
 ## 安全说明（当前版本）
 

@@ -6,6 +6,8 @@ coverage.out
 tmp/
 bin/
 data/
+web/frontend/node_modules/
+web/static/react/
 .DS_Store
 .idea/
 .vscode/
