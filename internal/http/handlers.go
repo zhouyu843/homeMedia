@@ -253,12 +253,21 @@ func (h Handler) ViewMedia(c *gin.Context) {
 func (h Handler) ThumbnailMedia(c *gin.Context) {
 	contentType, thumbnail, err := h.service.Thumbnail(c.Request.Context(), c.Param("id"))
 	if err != nil {
+		if errors.Is(err, media.ErrNotFound) || errors.Is(err, media.ErrFileMissing) || errors.Is(err, media.ErrThumbnailGeneration) {
+			c.Header("Cache-Control", "private, max-age=60")
+			c.Data(http.StatusOK, "image/svg+xml", placeholderThumbnailSVG())
+			return
+		}
 		h.writeMediaError(c, err)
 		return
 	}
 
 	c.Header("Cache-Control", "private, max-age=600")
 	c.Data(http.StatusOK, contentType, thumbnail)
+}
+
+func placeholderThumbnailSVG() []byte {
+	return []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 270" role="img" aria-label="preview unavailable"><rect width="360" height="270" fill="#e2e8f0"/><rect x="24" y="24" width="312" height="222" rx="16" fill="#cbd5e1"/><text x="180" y="146" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#475569" letter-spacing="2">PREVIEW</text></svg>`)
 }
 
 func (h Handler) uploadFromHeader(c *gin.Context, fileHeader *multipart.FileHeader) (media.Asset, error) {

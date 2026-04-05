@@ -325,6 +325,42 @@ func TestThumbnailMediaReturnsJPEG(t *testing.T) {
 	}
 }
 
+func TestThumbnailMissingFileReturnsPlaceholder(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{
+		assets: []media.Asset{{
+			ID:               "asset-1",
+			OriginalFilename: "missing.jpg",
+			StoredFilename:   "missing.jpg",
+			MediaType:        media.MediaTypeImage,
+			MIMEType:         "image/jpeg",
+			SizeBytes:        10,
+			StoragePath:      "20260403/missing.jpg",
+			CreatedAt:        time.Now().UTC(),
+		}},
+	}
+	service := media.NewService(repo, brokenStore{})
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/media/asset-1/thumbnail", nil)
+	req.AddCookie(sessionCookie)
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	if got := resp.Header().Get("Content-Type"); got != "image/svg+xml" {
+		t.Fatalf("expected content type image/svg+xml, got %q", got)
+	}
+	if !strings.Contains(resp.Body.String(), "PREVIEW") {
+		t.Fatalf("expected placeholder thumbnail body, got %q", resp.Body.String())
+	}
+}
+
 func TestProtectedRoutesRedirectWhenUnauthenticated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

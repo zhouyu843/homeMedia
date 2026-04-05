@@ -181,9 +181,9 @@
             <a class="card" href="/media/{{.ID}}">
                 <figure class="thumb-wrap">
                     {{if eq .MediaType "image"}}
-                    <img src="/media/{{.ID}}/thumbnail" alt="{{.OriginalFilename}}" loading="lazy" onerror="this.onerror=null;this.src='/media/{{.ID}}/view';">
+                    <img src="/media/{{.ID}}/thumbnail" alt="{{.OriginalFilename}}" loading="lazy" data-thumb-kind="image" data-fallback-src="/media/{{.ID}}/view">
                     {{else}}
-                    <img src="/media/{{.ID}}/thumbnail" alt="{{.OriginalFilename}}" loading="lazy">
+                    <img src="/media/{{.ID}}/thumbnail" alt="{{.OriginalFilename}}" loading="lazy" data-thumb-kind="video">
                     {{if eq .MediaType "video"}}<span class="badge">VIDEO</span>{{end}}
                     {{end}}
                 </figure>
@@ -195,6 +195,6 @@
         <p class="empty">还没有上传任何媒体。</p>
         {{end}}
     </div>
-    <script type="module" src="/static/react/upload-island.js"></script>
+    <script type="module" src="/static/react/upload-island.js?v=20260405-1"></script>
 </body>
 </html>
