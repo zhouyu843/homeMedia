@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"io"
 	"mime/multipart"
@@ -158,7 +159,7 @@ func TestAPIUploadReturnsJSON(t *testing.T) {
 
 	var payload struct {
 		Existing bool `json:"existing"`
-		Asset struct {
+		Asset    struct {
 			ID               string `json:"id"`
 			OriginalFilename string `json:"originalFilename"`
 			DetailURL        string `json:"detailUrl"`
@@ -220,7 +221,7 @@ func TestAPIUploadReturnsExistingAssetForDuplicateContent(t *testing.T) {
 
 	var payload struct {
 		Existing bool `json:"existing"`
-		Asset struct {
+		Asset    struct {
 			ID               string `json:"id"`
 			OriginalFilename string `json:"originalFilename"`
 		} `json:"asset"`
@@ -347,6 +348,210 @@ func TestDownloadMissingFileReturnsNotFound(t *testing.T) {
 
 	if resp.Code != http.StatusNotFound {
 		t.Fatalf("expected status 404, got %d", resp.Code)
+	}
+}
+
+func TestDetailAndListRenderDeleteForms(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{assets: []media.Asset{{
+		ID:               "asset-1",
+		OriginalFilename: "photo.jpg",
+		StoredFilename:   "photo.jpg",
+		MediaType:        media.MediaTypeImage,
+		MIMEType:         "image/jpeg",
+		SizeBytes:        7,
+		StoragePath:      "20260403/photo.jpg",
+		CreatedAt:        time.Now().UTC(),
+	}}}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+
+	listResp := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/media", nil)
+	listReq.AddCookie(sessionCookie)
+	router.ServeHTTP(listResp, listReq)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected list status 200, got %d", listResp.Code)
+	}
+	if !strings.Contains(listResp.Body.String(), "/media/asset-1/delete") {
+		t.Fatalf("expected list page delete form, got %q", listResp.Body.String())
+	}
+
+	detailResp := httptest.NewRecorder()
+	detailReq := httptest.NewRequest(http.MethodGet, "/media/asset-1", nil)
+	detailReq.AddCookie(sessionCookie)
+	router.ServeHTTP(detailResp, detailReq)
+	if detailResp.Code != http.StatusOK {
+		t.Fatalf("expected detail status 200, got %d", detailResp.Code)
+	}
+	if !strings.Contains(detailResp.Body.String(), "/media/asset-1/delete") {
+		t.Fatalf("expected detail page delete form, got %q", detailResp.Body.String())
+	}
+}
+
+func TestDeleteMediaRequiresCSRF(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{assets: []media.Asset{{
+		ID:               "asset-1",
+		OriginalFilename: "photo.jpg",
+		StoredFilename:   "photo.jpg",
+		MediaType:        media.MediaTypeImage,
+		MIMEType:         "image/jpeg",
+		SizeBytes:        7,
+		StoragePath:      "20260403/photo.jpg",
+		CreatedAt:        time.Now().UTC(),
+	}}}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/media/asset-1/delete", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(sessionCookie)
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", resp.Code)
+	}
+}
+
+func TestDeleteMediaRemovesAssetAndRedirects(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	storedFile, err := store.Save(context.Background(), "photo.jpg", bytes.NewReader([]byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}))
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	repo.assets = []media.Asset{{
+		ID:               "asset-1",
+		OriginalFilename: "photo.jpg",
+		StoredFilename:   storedFile.StoredFilename,
+		MediaType:        media.MediaTypeImage,
+		MIMEType:         "image/jpeg",
+		SizeBytes:        7,
+		StoragePath:      storedFile.StoragePath,
+		CreatedAt:        time.Now().UTC(),
+	}}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	csrfToken := getPageCSRFToken(t, router, "/media/asset-1", sessionCookie)
+
+	form := url.Values{}
+	form.Set("csrf_token", csrfToken)
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/media/asset-1/delete", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(sessionCookie)
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusSeeOther {
+		t.Fatalf("expected status 303, got %d with body %q", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Location"); got != "/media" {
+		t.Fatalf("expected redirect to /media, got %q", got)
+	}
+	if _, err := store.Open(storedFile.StoragePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected physical file to be deleted, got %v", err)
+	}
+
+	detailResp := httptest.NewRecorder()
+	detailReq := httptest.NewRequest(http.MethodGet, "/media/asset-1", nil)
+	detailReq.AddCookie(sessionCookie)
+	router.ServeHTTP(detailResp, detailReq)
+	if detailResp.Code != http.StatusNotFound {
+		t.Fatalf("expected deleted detail status 404, got %d", detailResp.Code)
+	}
+}
+
+func TestDeleteMediaKeepsSharedFileForRemainingAsset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	storedFile, err := store.Save(context.Background(), "photo.jpg", bytes.NewReader([]byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}))
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	now := time.Now().UTC()
+	repo.assets = []media.Asset{
+		{
+			ID:               "asset-1",
+			OriginalFilename: "photo-a.jpg",
+			StoredFilename:   storedFile.StoredFilename,
+			MediaType:        media.MediaTypeImage,
+			MIMEType:         "image/jpeg",
+			SizeBytes:        7,
+			StoragePath:      storedFile.StoragePath,
+			CreatedAt:        now,
+		},
+		{
+			ID:               "asset-2",
+			OriginalFilename: "photo-b.jpg",
+			StoredFilename:   storedFile.StoredFilename,
+			MediaType:        media.MediaTypeImage,
+			MIMEType:         "image/jpeg",
+			SizeBytes:        7,
+			StoragePath:      storedFile.StoragePath,
+			CreatedAt:        now.Add(-time.Minute),
+		},
+	}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	csrfToken := getPageCSRFToken(t, router, "/media/asset-1", sessionCookie)
+
+	form := url.Values{}
+	form.Set("csrf_token", csrfToken)
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/media/asset-1/delete", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(sessionCookie)
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusSeeOther {
+		t.Fatalf("expected status 303, got %d", resp.Code)
+	}
+	if _, err := store.Open(storedFile.StoragePath); err != nil {
+		t.Fatalf("expected shared file to remain, got %v", err)
+	}
+
+	downloadResp := httptest.NewRecorder()
+	downloadReq := httptest.NewRequest(http.MethodGet, "/media/asset-2/download", nil)
+	downloadReq.AddCookie(sessionCookie)
+	router.ServeHTTP(downloadResp, downloadReq)
+	if downloadResp.Code != http.StatusOK {
+		t.Fatalf("expected remaining asset download status 200, got %d", downloadResp.Code)
 	}
 }
 
@@ -524,13 +729,17 @@ func testTemplates(t *testing.T) *template.Template {
 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
 <input id="file" name="file" type="file" required>
 </form>
-{{range .Assets}}{{.OriginalFilename}}{{end}}
+{{range .Assets}}
+<a href="/media/{{.ID}}">{{.OriginalFilename}}</a>
+<form action="/media/{{.ID}}/delete" method="post"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"></form>
+{{end}}
 {{end}}
 {{define "detail.html"}}
 {{if eq .Asset.MediaType "image"}}<img src="/media/{{.Asset.ID}}/view" alt="{{.Asset.OriginalFilename}}">{{end}}
 {{if eq .Asset.MediaType "video"}}<video controls><source src="/media/{{.Asset.ID}}/view" type="{{.Asset.MIMEType}}"></video>{{end}}
 <img src="/media/{{.Asset.ID}}/thumbnail" alt="thumb">
 <a href="/media/{{.Asset.ID}}/download">download</a>
+<form action="/media/{{.Asset.ID}}/delete" method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
 <form action="/logout" method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
 {{end}}
 {{define "login.html"}}
@@ -705,6 +914,30 @@ func (m *memoryRepository) ListRecent(_ context.Context) ([]media.Asset, error) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.assets, nil
+}
+
+func (m *memoryRepository) Delete(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for index, asset := range m.assets {
+		if asset.ID == id {
+			m.assets = append(m.assets[:index], m.assets[index+1:]...)
+			return nil
+		}
+	}
+	return media.ErrNotFound
+}
+
+func (m *memoryRepository) CountByStoragePath(_ context.Context, storagePath string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, asset := range m.assets {
+		if asset.StoragePath == storagePath {
+			count++
+		}
+	}
+	return count, nil
 }
 
 type brokenStore struct{}

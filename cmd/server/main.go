@@ -88,3 +88,7 @@ func (a serviceAdapter) Download(ctx context.Context, id string) (media.Asset, i
 func (a serviceAdapter) Thumbnail(ctx context.Context, id string) (string, []byte, error) {
 	return a.service.Thumbnail(ctx, id)
 }
+
+func (a serviceAdapter) Delete(ctx context.Context, id string) error {
+	return a.service.Delete(ctx, id)
+}

@@ -112,13 +112,17 @@
             border: 1px solid var(--line);
             border-radius: 14px;
             overflow: hidden;
-            text-decoration: none;
-            color: inherit;
             transform: translateY(0);
             transition: transform 160ms ease;
             display: grid;
+            position: relative;
         }
         .card:hover { transform: translateY(-2px); }
+        .card-link {
+            display: grid;
+            text-decoration: none;
+            color: inherit;
+        }
         .thumb-wrap {
             margin: 0;
             aspect-ratio: 4 / 3;
@@ -158,6 +162,22 @@
             padding: 1.25rem;
             color: var(--muted);
         }
+        .card-delete {
+            position: absolute;
+            top: 0.55rem;
+            right: 0.55rem;
+            margin: 0;
+            z-index: 2;
+        }
+        .card-delete button {
+            border: 1px solid rgba(248, 113, 113, 0.55);
+            background: rgba(255, 241, 242, 0.96);
+            color: #b91c1c;
+            border-radius: 999px;
+            padding: 0.28rem 0.62rem;
+            font-size: 0.76rem;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -187,17 +207,23 @@
         {{if .Assets}}
         <section class="gallery">
             {{range .Assets}}
-            <a class="card" href="/media/{{.ID}}">
-                <figure class="thumb-wrap">
-                    {{if eq .MediaType "image"}}
-                    <img src="/media/{{.ID}}/thumbnail" alt="{{.OriginalFilename}}" loading="lazy" data-thumb-kind="image" data-fallback-src="/media/{{.ID}}/view">
-                    {{else}}
-                    <img src="/media/{{.ID}}/thumbnail" alt="{{.OriginalFilename}}" loading="lazy" data-thumb-kind="video">
-                    {{if eq .MediaType "video"}}<span class="badge">VIDEO</span>{{end}}
-                    {{end}}
-                </figure>
-                <p class="name">{{.OriginalFilename}}</p>
-            </a>
+            <article class="card">
+                <form class="card-delete" action="/media/{{.ID}}/delete" method="post" onsubmit="return confirm('确定直接删除这个媒体吗？删除后不可恢复。');">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit">删除</button>
+                </form>
+                <a class="card-link" href="/media/{{.ID}}">
+                    <figure class="thumb-wrap">
+                        {{if eq .MediaType "image"}}
+                        <img src="/media/{{.ID}}/thumbnail" alt="{{.OriginalFilename}}" loading="lazy" data-thumb-kind="image" data-fallback-src="/media/{{.ID}}/view">
+                        {{else}}
+                        <img src="/media/{{.ID}}/thumbnail" alt="{{.OriginalFilename}}" loading="lazy" data-thumb-kind="video">
+                        {{if eq .MediaType "video"}}<span class="badge">VIDEO</span>{{end}}
+                        {{end}}
+                    </figure>
+                    <p class="name">{{.OriginalFilename}}</p>
+                </a>
+            </article>
             {{end}}
         </section>
         {{else}}

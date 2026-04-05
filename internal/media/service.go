@@ -130,6 +130,32 @@ func (s Service) Download(ctx context.Context, id string) (Asset, io.ReadSeekClo
 	return asset, file, nil
 }
 
+func (s Service) Delete(ctx context.Context, id string) error {
+	asset, err := s.repository.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	storagePathRefCount, err := s.repository.CountByStoragePath(ctx, asset.StoragePath)
+	if err != nil {
+		return err
+	}
+
+	if err := s.repository.Delete(ctx, id); err != nil {
+		return err
+	}
+
+	if storagePathRefCount > 1 {
+		return nil
+	}
+
+	if err := s.fileStore.Delete(asset.StoragePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+
+	return nil
+}
+
 func (s Service) Thumbnail(ctx context.Context, id string) (string, []byte, error) {
 	asset, file, err := s.Download(ctx, id)
 	if err != nil {

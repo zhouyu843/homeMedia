@@ -172,6 +172,43 @@ func (r MediaRepository) ListRecent(ctx context.Context) ([]media.Asset, error) 
 	return assets, nil
 }
 
+func (r MediaRepository) Delete(ctx context.Context, id string) error {
+	query := `
+		DELETE FROM media_assets
+		WHERE id = $1
+	`
+
+	result, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("delete media asset: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete media asset rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return media.ErrNotFound
+	}
+
+	return nil
+}
+
+func (r MediaRepository) CountByStoragePath(ctx context.Context, storagePath string) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM media_assets
+		WHERE storage_path = $1
+	`
+
+	var count int
+	if err := r.db.QueryRowContext(ctx, query, storagePath).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count media assets by storage path: %w", err)
+	}
+
+	return count, nil
+}
+
 type assetScanner interface {
 	Scan(dest ...any) error
 }

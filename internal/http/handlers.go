@@ -23,6 +23,7 @@ type MediaService interface {
 	Get(ctx context.Context, id string) (media.Asset, error)
 	Download(ctx context.Context, id string) (media.Asset, io.ReadSeekCloser, error)
 	Thumbnail(ctx context.Context, id string) (string, []byte, error)
+	Delete(ctx context.Context, id string) error
 }
 
 type Handler struct {
@@ -214,6 +215,20 @@ func (h Handler) UploadMediaJSON(c *gin.Context) {
 		"asset":    toMediaAssetResponse(result.Asset),
 		"existing": result.Existing,
 	})
+}
+
+func (h Handler) DeleteMedia(c *gin.Context) {
+	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
+		c.String(http.StatusForbidden, "invalid csrf token")
+		return
+	}
+
+	if err := h.service.Delete(c.Request.Context(), c.Param("id")); err != nil {
+		h.writeMediaError(c, err)
+		return
+	}
+
+	c.Redirect(http.StatusSeeOther, "/media")
 }
 
 func (h Handler) renderLogin(c *gin.Context, status int, errMsg string) {

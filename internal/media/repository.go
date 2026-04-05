@@ -12,6 +12,8 @@ type Repository interface {
 	FindWithoutContentHashBySize(ctx context.Context, sizeBytes int64) ([]Asset, error)
 	UpdateContentHash(ctx context.Context, id string, contentHash string) error
 	ListRecent(ctx context.Context) ([]Asset, error)
+	Delete(ctx context.Context, id string) error
+	CountByStoragePath(ctx context.Context, storagePath string) (int, error)
 }
 
 type FileStore interface {

@@ -204,14 +204,90 @@ func TestServiceDownloadReturnsFileMissing(t *testing.T) {
 	}
 }
 
+func TestServiceDeleteRemovesAssetAndFile(t *testing.T) {
+	repo := &fakeRepository{
+		assetByID: map[string]Asset{
+			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg"},
+		},
+		storagePathCounts: map[string]int{"20260403/photo.jpg": 1},
+	}
+	store := &fakeFileStore{}
+	service := NewService(repo, store)
+
+	err := service.Delete(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatalf("Delete returned error: %v", err)
+	}
+	if repo.deletedID != "asset-1" {
+		t.Fatalf("expected deleted ID asset-1, got %q", repo.deletedID)
+	}
+	if store.deletedPath != "20260403/photo.jpg" {
+		t.Fatalf("expected deleted path 20260403/photo.jpg, got %q", store.deletedPath)
+	}
+}
+
+func TestServiceDeleteSkipsPhysicalDeleteForSharedFile(t *testing.T) {
+	repo := &fakeRepository{
+		assetByID: map[string]Asset{
+			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg"},
+		},
+		storagePathCounts: map[string]int{"20260403/photo.jpg": 2},
+	}
+	store := &fakeFileStore{}
+	service := NewService(repo, store)
+
+	err := service.Delete(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatalf("Delete returned error: %v", err)
+	}
+	if repo.deletedID != "asset-1" {
+		t.Fatalf("expected deleted ID asset-1, got %q", repo.deletedID)
+	}
+	if store.deletedPath != "" {
+		t.Fatalf("expected shared file to skip physical delete, got %q", store.deletedPath)
+	}
+}
+
+func TestServiceDeleteMissingFileStillDeletesRecord(t *testing.T) {
+	repo := &fakeRepository{
+		assetByID: map[string]Asset{
+			"asset-1": {ID: "asset-1", StoragePath: "20260403/photo.jpg"},
+		},
+		storagePathCounts: map[string]int{"20260403/photo.jpg": 1},
+	}
+	store := &fakeFileStore{deleteErr: os.ErrNotExist}
+	service := NewService(repo, store)
+
+	err := service.Delete(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatalf("expected delete to tolerate missing file, got %v", err)
+	}
+	if repo.deletedID != "asset-1" {
+		t.Fatalf("expected deleted ID asset-1, got %q", repo.deletedID)
+	}
+}
+
+func TestServiceDeleteReturnsNotFound(t *testing.T) {
+	service := NewService(&fakeRepository{}, &fakeFileStore{})
+
+	err := service.Delete(context.Background(), "missing")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
 type fakeRepository struct {
-	savedAsset Asset
-	saveErr    error
-	assetByID  map[string]Asset
-	assetByContentHash map[string]Asset
+	savedAsset                     Asset
+	saveErr                        error
+	assetByID                      map[string]Asset
+	assetByContentHash             map[string]Asset
 	assetsWithoutContentHashBySize map[int64][]Asset
-	updatedContentHashes map[string]string
-	listAssets []Asset
+	updatedContentHashes           map[string]string
+	listAssets                     []Asset
+	storagePathCounts              map[string]int
+	deletedID                      string
+	deleteErr                      error
+	countErr                       error
 }
 
 func (f *fakeRepository) Save(_ context.Context, asset Asset) (Asset, error) {
@@ -258,12 +334,32 @@ func (f *fakeRepository) ListRecent(_ context.Context) ([]Asset, error) {
 	return f.listAssets, nil
 }
 
+func (f *fakeRepository) Delete(_ context.Context, id string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	if _, ok := f.assetByID[id]; !ok {
+		return ErrNotFound
+	}
+	f.deletedID = id
+	delete(f.assetByID, id)
+	return nil
+}
+
+func (f *fakeRepository) CountByStoragePath(_ context.Context, storagePath string) (int, error) {
+	if f.countErr != nil {
+		return 0, f.countErr
+	}
+	return f.storagePathCounts[storagePath], nil
+}
+
 type fakeFileStore struct {
 	storedFile  StoredFile
 	saveErr     error
 	openFile    io.ReadSeekCloser
 	openErr     error
 	deletedPath string
+	deleteErr   error
 	saveCalls   int
 }
 
@@ -284,7 +380,7 @@ func (f *fakeFileStore) Open(_ string) (io.ReadSeekCloser, error) {
 
 func (f *fakeFileStore) Delete(storagePath string) error {
 	f.deletedPath = storagePath
-	return nil
+	return f.deleteErr
 }
 
 type duplicateOnSaveRepository struct {
@@ -318,6 +414,14 @@ func (d *duplicateOnSaveRepository) UpdateContentHash(_ context.Context, _ strin
 
 func (d *duplicateOnSaveRepository) ListRecent(_ context.Context) ([]Asset, error) {
 	return nil, nil
+}
+
+func (d *duplicateOnSaveRepository) Delete(_ context.Context, _ string) error {
+	return nil
+}
+
+func (d *duplicateOnSaveRepository) CountByStoragePath(_ context.Context, _ string) (int, error) {
+	return 0, nil
 }
 
 type readSeekNopCloser struct {

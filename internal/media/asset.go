@@ -42,4 +42,3 @@ type StoredFile struct {
 	StoragePath    string
 	SizeBytes      int64
 }
-
