@@ -13,6 +13,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -156,6 +157,7 @@ func TestAPIUploadReturnsJSON(t *testing.T) {
 	}
 
 	var payload struct {
+		Existing bool `json:"existing"`
 		Asset struct {
 			ID               string `json:"id"`
 			OriginalFilename string `json:"originalFilename"`
@@ -169,11 +171,71 @@ func TestAPIUploadReturnsJSON(t *testing.T) {
 	if payload.Asset.ID == "" {
 		t.Fatal("expected response asset id to be set")
 	}
+	if payload.Existing {
+		t.Fatal("expected first upload to create a new asset")
+	}
 	if payload.Asset.OriginalFilename != "photo.jpg" {
 		t.Fatalf("expected originalFilename photo.jpg, got %q", payload.Asset.OriginalFilename)
 	}
 	if !strings.HasPrefix(payload.Asset.DetailURL, "/media/") {
 		t.Fatalf("expected detailUrl to start with /media/, got %q", payload.Asset.DetailURL)
+	}
+}
+
+func TestAPIUploadReturnsExistingAssetForDuplicateContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &memoryRepository{}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+	uploadCSRFToken := getPageCSRFToken(t, router, "/media", sessionCookie)
+	body := []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00}
+
+	firstReq := newUploadRequest(t, "file", "photo-original.jpg", body, map[string]string{"csrf_token": uploadCSRFToken})
+	firstReq.URL.Path = "/api/uploads"
+	firstReq.Header.Set("X-CSRF-Token", uploadCSRFToken)
+	firstReq.AddCookie(sessionCookie)
+	firstResp := httptest.NewRecorder()
+	router.ServeHTTP(firstResp, firstReq)
+	if firstResp.Code != http.StatusCreated {
+		t.Fatalf("expected first upload status 201, got %d with body %q", firstResp.Code, firstResp.Body.String())
+	}
+
+	secondReq := newUploadRequest(t, "file", "photo-copy.jpg", body, map[string]string{"csrf_token": uploadCSRFToken})
+	secondReq.URL.Path = "/api/uploads"
+	secondReq.Header.Set("X-CSRF-Token", uploadCSRFToken)
+	secondReq.AddCookie(sessionCookie)
+	secondResp := httptest.NewRecorder()
+	router.ServeHTTP(secondResp, secondReq)
+	if secondResp.Code != http.StatusOK {
+		t.Fatalf("expected duplicate upload status 200, got %d with body %q", secondResp.Code, secondResp.Body.String())
+	}
+
+	var payload struct {
+		Existing bool `json:"existing"`
+		Asset struct {
+			ID               string `json:"id"`
+			OriginalFilename string `json:"originalFilename"`
+		} `json:"asset"`
+	}
+	if err := json.Unmarshal(secondResp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal returned error: %v", err)
+	}
+	if !payload.Existing {
+		t.Fatal("expected duplicate upload to be marked as existing")
+	}
+	if len(repo.assets) != 1 {
+		t.Fatalf("expected one stored asset after duplicate upload, got %d", len(repo.assets))
+	}
+	if payload.Asset.OriginalFilename != "photo-original.jpg" {
+		t.Fatalf("expected duplicate upload to reuse existing asset metadata, got %q", payload.Asset.OriginalFilename)
 	}
 }
 
@@ -536,15 +598,20 @@ func findCookie(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie 
 }
 
 type memoryRepository struct {
+	mu     sync.Mutex
 	assets []media.Asset
 }
 
 func (m *memoryRepository) Save(_ context.Context, asset media.Asset) (media.Asset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.assets = append([]media.Asset{asset}, m.assets...)
 	return asset, nil
 }
 
 func (m *memoryRepository) FindByID(_ context.Context, id string) (media.Asset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, asset := range m.assets {
 		if asset.ID == id {
 			return asset, nil
@@ -553,7 +620,20 @@ func (m *memoryRepository) FindByID(_ context.Context, id string) (media.Asset, 
 	return media.Asset{}, media.ErrNotFound
 }
 
+func (m *memoryRepository) FindByContentHash(_ context.Context, contentHash string) (media.Asset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, asset := range m.assets {
+		if asset.ContentHash == contentHash {
+			return asset, nil
+		}
+	}
+	return media.Asset{}, media.ErrNotFound
+}
+
 func (m *memoryRepository) ListRecent(_ context.Context) ([]media.Asset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.assets, nil
 }
 

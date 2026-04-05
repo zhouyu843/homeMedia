@@ -10,12 +10,37 @@
 - 列表缩略图预览（图片和视频）
 - 查看单个媒体详情并直接预览图片/视频
 - 下载原始文件
+- 精确内容去重（基于文件内容 SHA-256）
 - 登录/登出（单管理员账号）
 
 详情页行为说明：
 - 访问 `/media/:id` 进入详情页，页面内嵌预览图片或视频。
 - 访问 `/media/:id/thumbnail` 获取媒体缩略图（JPEG）。
 - 访问 `/media/:id/download` 下载原始文件。
+
+上传去重行为说明：
+- 上传时会基于文件二进制内容计算 SHA-256 做精确去重，不按文件名判重。
+- 内容相同但文件名不同：复用已有媒体资源，不重复保存物理文件。
+- 文件名相同但内容不同：视为不同媒体，允许共存。
+- JSON 上传接口 `POST /api/uploads` 在新建时返回 `201`，命中重复内容时返回 `200`，响应体会包含 `existing` 布尔字段。
+- 该能力对迁移后新上传的文件立即生效；历史数据如需参与去重，需要额外补齐 `content_hash`。
+
+本次上传去重改动生效步骤：
+- 这次改动只涉及 Go 代码和数据库 migration，不涉及前端构建产物。
+- 如果容器还没启动，直接执行 `docker compose up --build` 即可；`migrate` 会自动执行，`app` 会以最新代码启动。
+- 如果开发环境已经在运行，通常不需要重建 Docker 镜像，因为 `app` 服务通过 `./:/app` 挂载了本地代码。
+- 但需要执行一次数据库迁移：`docker compose run --rm migrate`。
+- 然后重启应用进程让新代码生效：`docker compose restart app`。
+- 如果你刚改了 Go 依赖、Dockerfile、系统包或基础镜像，再执行 `docker compose up -d --build` 更稳妥。
+- 变更完成后，建议执行 `docker compose run --rm app go test ./...` 做一次回归验证。
+
+推荐的增量更新命令：
+
+```bash
+docker compose run --rm migrate
+docker compose restart app
+docker compose run --rm app go test ./...
+```
 
 鉴权行为说明：
 - 访问 `/login` 打开登录页。

@@ -24,7 +24,7 @@ func TestServiceUploadStoresMetadata(t *testing.T) {
 		return time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC)
 	}
 
-	asset, err := service.Upload(context.Background(), UploadInput{
+	result, err := service.Upload(context.Background(), UploadInput{
 		OriginalFilename: "photo.jpg",
 		MIMEType:         "image/jpeg",
 		SizeBytes:        4,
@@ -33,6 +33,10 @@ func TestServiceUploadStoresMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Upload returned error: %v", err)
 	}
+	if !result.Created || result.Existing {
+		t.Fatalf("expected created upload result, got %+v", result)
+	}
+	asset := result.Asset
 
 	if asset.OriginalFilename != "photo.jpg" {
 		t.Fatalf("expected original filename to be preserved, got %q", asset.OriginalFilename)
@@ -81,6 +85,75 @@ func TestServiceUploadCleansUpStoredFileWhenSaveFails(t *testing.T) {
 	}
 }
 
+func TestServiceUploadReusesExistingAssetWithSameContentHash(t *testing.T) {
+	existingAsset := Asset{
+		ID:               "asset-existing",
+		OriginalFilename: "photo-original.jpg",
+		StoredFilename:   "stored-existing.jpg",
+		MediaType:        MediaTypeImage,
+		MIMEType:         "image/jpeg",
+		SizeBytes:        4,
+		ContentHash:      "3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7",
+		StoragePath:      "20260403/stored-existing.jpg",
+		CreatedAt:        time.Now().UTC(),
+	}
+	repo := &fakeRepository{assetByContentHash: map[string]Asset{existingAsset.ContentHash: existingAsset}}
+	store := &fakeFileStore{}
+	service := NewService(repo, store)
+
+	result, err := service.Upload(context.Background(), UploadInput{
+		OriginalFilename: "different-name.jpg",
+		MIMEType:         "image/jpeg",
+		Reader:           strings.NewReader("data"),
+	})
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if result.Created || !result.Existing {
+		t.Fatalf("expected existing upload result, got %+v", result)
+	}
+	if result.Asset.ID != existingAsset.ID {
+		t.Fatalf("expected existing asset ID %q, got %q", existingAsset.ID, result.Asset.ID)
+	}
+	if store.saveCalls != 0 {
+		t.Fatalf("expected file store to be skipped for duplicate content, got %d save calls", store.saveCalls)
+	}
+}
+
+func TestServiceUploadDeletesStoredFileWhenRepositoryReportsDuplicateContentHash(t *testing.T) {
+	existingAsset := Asset{
+		ID:               "asset-existing",
+		OriginalFilename: "photo-original.jpg",
+		StoredFilename:   "stored-existing.jpg",
+		MediaType:        MediaTypeImage,
+		MIMEType:         "image/jpeg",
+		SizeBytes:        4,
+		ContentHash:      "3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7",
+		StoragePath:      "20260403/stored-existing.jpg",
+		CreatedAt:        time.Now().UTC(),
+	}
+	repo := &duplicateOnSaveRepository{existingAsset: existingAsset}
+	store := &fakeFileStore{
+		storedFile: StoredFile{StoredFilename: "stored-new.jpg", StoragePath: "20260403/stored-new.jpg", SizeBytes: 4},
+	}
+	service := NewService(repo, store)
+
+	result, err := service.Upload(context.Background(), UploadInput{
+		OriginalFilename: "photo-copy.jpg",
+		MIMEType:         "image/jpeg",
+		Reader:           strings.NewReader("data"),
+	})
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if result.Created || !result.Existing {
+		t.Fatalf("expected existing upload result, got %+v", result)
+	}
+	if store.deletedPath != "20260403/stored-new.jpg" {
+		t.Fatalf("expected duplicate save cleanup, got %q", store.deletedPath)
+	}
+}
+
 func TestServiceDownloadReturnsFileMissing(t *testing.T) {
 	repo := &fakeRepository{assetByID: map[string]Asset{
 		"asset-1": {ID: "asset-1", StoragePath: "20260403/missing.jpg"},
@@ -98,6 +171,7 @@ type fakeRepository struct {
 	savedAsset Asset
 	saveErr    error
 	assetByID  map[string]Asset
+	assetByContentHash map[string]Asset
 	listAssets []Asset
 }
 
@@ -106,11 +180,23 @@ func (f *fakeRepository) Save(_ context.Context, asset Asset) (Asset, error) {
 		return Asset{}, f.saveErr
 	}
 	f.savedAsset = asset
+	if f.assetByContentHash == nil {
+		f.assetByContentHash = map[string]Asset{}
+	}
+	f.assetByContentHash[asset.ContentHash] = asset
 	return asset, nil
 }
 
 func (f *fakeRepository) FindByID(_ context.Context, id string) (Asset, error) {
 	asset, ok := f.assetByID[id]
+	if !ok {
+		return Asset{}, ErrNotFound
+	}
+	return asset, nil
+}
+
+func (f *fakeRepository) FindByContentHash(_ context.Context, contentHash string) (Asset, error) {
+	asset, ok := f.assetByContentHash[contentHash]
 	if !ok {
 		return Asset{}, ErrNotFound
 	}
@@ -127,9 +213,11 @@ type fakeFileStore struct {
 	openFile    io.ReadSeekCloser
 	openErr     error
 	deletedPath string
+	saveCalls   int
 }
 
 func (f *fakeFileStore) Save(_ context.Context, _ string, _ io.Reader) (StoredFile, error) {
+	f.saveCalls++
 	if f.saveErr != nil {
 		return StoredFile{}, f.saveErr
 	}
@@ -146,4 +234,29 @@ func (f *fakeFileStore) Open(_ string) (io.ReadSeekCloser, error) {
 func (f *fakeFileStore) Delete(storagePath string) error {
 	f.deletedPath = storagePath
 	return nil
+}
+
+type duplicateOnSaveRepository struct {
+	existingAsset Asset
+	findCalls     int
+}
+
+func (d *duplicateOnSaveRepository) Save(_ context.Context, _ Asset) (Asset, error) {
+	return Asset{}, ErrDuplicateContentHash
+}
+
+func (d *duplicateOnSaveRepository) FindByID(_ context.Context, _ string) (Asset, error) {
+	return Asset{}, ErrNotFound
+}
+
+func (d *duplicateOnSaveRepository) FindByContentHash(_ context.Context, _ string) (Asset, error) {
+	d.findCalls++
+	if d.findCalls == 1 {
+		return Asset{}, ErrNotFound
+	}
+	return d.existingAsset, nil
+}
+
+func (d *duplicateOnSaveRepository) ListRecent(_ context.Context) ([]Asset, error) {
+	return nil, nil
 }

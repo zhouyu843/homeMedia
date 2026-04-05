@@ -3,10 +3,13 @@ package media
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -29,15 +32,36 @@ func NewService(repository Repository, fileStore FileStore) Service {
 	}
 }
 
-func (s Service) Upload(ctx context.Context, input UploadInput) (Asset, error) {
+func (s Service) Upload(ctx context.Context, input UploadInput) (UploadResult, error) {
 	mediaType, err := mediaTypeFromMIME(input.MIMEType)
 	if err != nil {
-		return Asset{}, err
+		return UploadResult{}, err
 	}
 
-	storedFile, err := s.fileStore.Save(ctx, input.OriginalFilename, input.Reader)
+	tempFile, contentHash, sizeBytes, err := createUploadTempFile(input.Reader)
 	if err != nil {
-		return Asset{}, err
+		return UploadResult{}, err
+	}
+	defer func() {
+		_ = tempFile.Close()
+		_ = os.Remove(tempFile.Name())
+	}()
+
+	existingAsset, err := s.repository.FindByContentHash(ctx, contentHash)
+	if err == nil {
+		return UploadResult{Asset: existingAsset, Existing: true}, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return UploadResult{}, err
+	}
+
+	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+		return UploadResult{}, fmt.Errorf("rewind upload temp file: %w", err)
+	}
+
+	storedFile, err := s.fileStore.Save(ctx, input.OriginalFilename, tempFile)
+	if err != nil {
+		return UploadResult{}, err
 	}
 
 	asset := Asset{
@@ -46,7 +70,8 @@ func (s Service) Upload(ctx context.Context, input UploadInput) (Asset, error) {
 		StoredFilename:   storedFile.StoredFilename,
 		MediaType:        mediaType,
 		MIMEType:         input.MIMEType,
-		SizeBytes:        storedFile.SizeBytes,
+		SizeBytes:        sizeBytes,
+		ContentHash:      contentHash,
 		StoragePath:      storedFile.StoragePath,
 		CreatedAt:        s.now().UTC(),
 	}
@@ -54,10 +79,19 @@ func (s Service) Upload(ctx context.Context, input UploadInput) (Asset, error) {
 	savedAsset, err := s.repository.Save(ctx, asset)
 	if err != nil {
 		_ = s.fileStore.Delete(storedFile.StoragePath)
-		return Asset{}, err
+		if errors.Is(err, ErrDuplicateContentHash) {
+			existingAsset, findErr := s.repository.FindByContentHash(ctx, contentHash)
+			if findErr == nil {
+				return UploadResult{Asset: existingAsset, Existing: true}, nil
+			}
+			if !errors.Is(findErr, ErrNotFound) {
+				return UploadResult{}, findErr
+			}
+		}
+		return UploadResult{}, err
 	}
 
-	return savedAsset, nil
+	return UploadResult{Asset: savedAsset, Created: true}, nil
 }
 
 func (s Service) List(ctx context.Context) ([]Asset, error) {
@@ -185,4 +219,21 @@ func generateThumbnailWithFFmpeg(ctx context.Context, source io.Reader, mediaTyp
 	}
 
 	return out.Bytes(), nil
+}
+
+func createUploadTempFile(source io.Reader) (*os.File, string, int64, error) {
+	tempFile, err := os.CreateTemp("", "home-media-upload-*")
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("create upload temp file: %w", err)
+	}
+
+	hasher := sha256.New()
+	sizeBytes, err := io.Copy(io.MultiWriter(tempFile, hasher), source)
+	if err != nil {
+		_ = tempFile.Close()
+		_ = os.Remove(tempFile.Name())
+		return nil, "", 0, fmt.Errorf("buffer upload file: %w", err)
+	}
+
+	return tempFile, hex.EncodeToString(hasher.Sum(nil)), sizeBytes, nil
 }

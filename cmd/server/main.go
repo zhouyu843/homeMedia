@@ -69,7 +69,7 @@ type serviceAdapter struct {
 	service media.Service
 }
 
-func (a serviceAdapter) Upload(ctx context.Context, input media.UploadInput) (media.Asset, error) {
+func (a serviceAdapter) Upload(ctx context.Context, input media.UploadInput) (media.UploadResult, error) {
 	return a.service.Upload(ctx, input)
 }
 

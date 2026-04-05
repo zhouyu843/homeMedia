@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"homeMedia/internal/media"
 )
 
@@ -26,9 +28,10 @@ func (r MediaRepository) Save(ctx context.Context, asset media.Asset) (media.Ass
 			media_type,
 			mime_type,
 			size_bytes,
+			content_hash,
 			storage_path,
 			created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
 
 	_, err := r.db.ExecContext(
@@ -40,10 +43,15 @@ func (r MediaRepository) Save(ctx context.Context, asset media.Asset) (media.Ass
 		asset.MediaType,
 		asset.MIMEType,
 		asset.SizeBytes,
+		asset.ContentHash,
 		asset.StoragePath,
 		asset.CreatedAt,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "uq_media_assets_content_hash" {
+			return media.Asset{}, media.ErrDuplicateContentHash
+		}
 		return media.Asset{}, fmt.Errorf("insert media asset: %w", err)
 	}
 
@@ -52,22 +60,13 @@ func (r MediaRepository) Save(ctx context.Context, asset media.Asset) (media.Ass
 
 func (r MediaRepository) FindByID(ctx context.Context, id string) (media.Asset, error) {
 	query := `
-		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, storage_path, created_at
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, content_hash, storage_path, created_at
 		FROM media_assets
 		WHERE id = $1
 	`
 
 	var asset media.Asset
-	if err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&asset.ID,
-		&asset.OriginalFilename,
-		&asset.StoredFilename,
-		&asset.MediaType,
-		&asset.MIMEType,
-		&asset.SizeBytes,
-		&asset.StoragePath,
-		&asset.CreatedAt,
-	); err != nil {
+	if err := scanAssetRow(r.db.QueryRowContext(ctx, query, id), &asset); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return media.Asset{}, media.ErrNotFound
 		}
@@ -77,9 +76,27 @@ func (r MediaRepository) FindByID(ctx context.Context, id string) (media.Asset, 
 	return asset, nil
 }
 
+func (r MediaRepository) FindByContentHash(ctx context.Context, contentHash string) (media.Asset, error) {
+	query := `
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, content_hash, storage_path, created_at
+		FROM media_assets
+		WHERE content_hash = $1
+	`
+
+	var asset media.Asset
+	if err := scanAssetRow(r.db.QueryRowContext(ctx, query, contentHash), &asset); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return media.Asset{}, media.ErrNotFound
+		}
+		return media.Asset{}, fmt.Errorf("find media asset by content hash: %w", err)
+	}
+
+	return asset, nil
+}
+
 func (r MediaRepository) ListRecent(ctx context.Context) ([]media.Asset, error) {
 	query := `
-		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, storage_path, created_at
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, content_hash, storage_path, created_at
 		FROM media_assets
 		ORDER BY created_at DESC
 	`
@@ -93,16 +110,7 @@ func (r MediaRepository) ListRecent(ctx context.Context) ([]media.Asset, error) 
 	var assets []media.Asset
 	for rows.Next() {
 		var asset media.Asset
-		if err := rows.Scan(
-			&asset.ID,
-			&asset.OriginalFilename,
-			&asset.StoredFilename,
-			&asset.MediaType,
-			&asset.MIMEType,
-			&asset.SizeBytes,
-			&asset.StoragePath,
-			&asset.CreatedAt,
-		); err != nil {
+		if err := scanAssetRow(rows, &asset); err != nil {
 			return nil, fmt.Errorf("scan media asset: %w", err)
 		}
 		assets = append(assets, asset)
@@ -113,4 +121,22 @@ func (r MediaRepository) ListRecent(ctx context.Context) ([]media.Asset, error) 
 	}
 
 	return assets, nil
+}
+
+type assetScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanAssetRow(scanner assetScanner, asset *media.Asset) error {
+	return scanner.Scan(
+		&asset.ID,
+		&asset.OriginalFilename,
+		&asset.StoredFilename,
+		&asset.MediaType,
+		&asset.MIMEType,
+		&asset.SizeBytes,
+		&asset.ContentHash,
+		&asset.StoragePath,
+		&asset.CreatedAt,
+	)
 }

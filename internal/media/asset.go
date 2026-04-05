@@ -1,6 +1,9 @@
 package media
 
-import "time"
+import (
+	"io"
+	"time"
+)
 
 type MediaType string
 
@@ -16,15 +19,22 @@ type Asset struct {
 	MediaType        MediaType
 	MIMEType         string
 	SizeBytes        int64
+	ContentHash      string
 	StoragePath      string
 	CreatedAt        time.Time
+}
+
+type UploadResult struct {
+	Asset    Asset
+	Created  bool
+	Existing bool
 }
 
 type UploadInput struct {
 	OriginalFilename string
 	MIMEType         string
 	SizeBytes        int64
-	Reader           Reader
+	Reader           io.Reader
 }
 
 type StoredFile struct {
@@ -33,6 +43,3 @@ type StoredFile struct {
 	SizeBytes      int64
 }
 
-type Reader interface {
-	Read(p []byte) (n int, err error)
-}

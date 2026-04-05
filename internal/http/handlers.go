@@ -18,7 +18,7 @@ import (
 )
 
 type MediaService interface {
-	Upload(ctx context.Context, input media.UploadInput) (media.Asset, error)
+	Upload(ctx context.Context, input media.UploadInput) (media.UploadResult, error)
 	List(ctx context.Context) ([]media.Asset, error)
 	Get(ctx context.Context, id string) (media.Asset, error)
 	Download(ctx context.Context, id string) (media.Asset, io.ReadSeekCloser, error)
@@ -172,13 +172,13 @@ func (h Handler) UploadMedia(c *gin.Context) {
 		return
 	}
 
-	asset, err := h.uploadFromHeader(c, fileHeader)
+	result, err := h.uploadFromHeader(c, fileHeader)
 	if err != nil {
 		h.writeMediaError(c, err)
 		return
 	}
 
-	c.Redirect(http.StatusSeeOther, "/media/"+asset.ID)
+	c.Redirect(http.StatusSeeOther, "/media/"+result.Asset.ID)
 }
 
 func (h Handler) UploadMediaJSON(c *gin.Context) {
@@ -199,13 +199,21 @@ func (h Handler) UploadMediaJSON(c *gin.Context) {
 		return
 	}
 
-	asset, err := h.uploadFromHeader(c, fileHeader)
+	result, err := h.uploadFromHeader(c, fileHeader)
 	if err != nil {
 		h.writeMediaErrorJSON(c, err)
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"asset": toMediaAssetResponse(asset)})
+	status := http.StatusCreated
+	if result.Existing {
+		status = http.StatusOK
+	}
+
+	c.JSON(status, gin.H{
+		"asset":    toMediaAssetResponse(result.Asset),
+		"existing": result.Existing,
+	})
 }
 
 func (h Handler) renderLogin(c *gin.Context, status int, errMsg string) {
@@ -270,34 +278,34 @@ func placeholderThumbnailSVG() []byte {
 	return []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 270" role="img" aria-label="preview unavailable"><rect width="360" height="270" fill="#e2e8f0"/><rect x="24" y="24" width="312" height="222" rx="16" fill="#cbd5e1"/><text x="180" y="146" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#475569" letter-spacing="2">PREVIEW</text></svg>`)
 }
 
-func (h Handler) uploadFromHeader(c *gin.Context, fileHeader *multipart.FileHeader) (media.Asset, error) {
+func (h Handler) uploadFromHeader(c *gin.Context, fileHeader *multipart.FileHeader) (media.UploadResult, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
-		return media.Asset{}, err
+		return media.UploadResult{}, err
 	}
 	defer file.Close()
 
 	buffer := make([]byte, 512)
 	bytesRead, readErr := file.Read(buffer)
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
-		return media.Asset{}, readErr
+		return media.UploadResult{}, readErr
 	}
 
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return media.Asset{}, err
+		return media.UploadResult{}, err
 	}
 
-	asset, err := h.service.Upload(c.Request.Context(), media.UploadInput{
+	result, err := h.service.Upload(c.Request.Context(), media.UploadInput{
 		OriginalFilename: fileHeader.Filename,
 		MIMEType:         http.DetectContentType(buffer[:bytesRead]),
 		SizeBytes:        fileHeader.Size,
 		Reader:           file,
 	})
 	if err != nil {
-		return media.Asset{}, err
+		return media.UploadResult{}, err
 	}
 
-	return asset, nil
+	return result, nil
 }
 
 func (h Handler) writeMediaError(c *gin.Context, err error) {
