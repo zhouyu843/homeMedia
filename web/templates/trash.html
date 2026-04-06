@@ -93,13 +93,52 @@
         .meta {
             display: grid;
             gap: 0.25rem;
+            min-width: 0;
         }
         .meta strong {
             font-size: 1rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .meta span {
             color: var(--muted);
             font-size: 0.92rem;
+        }
+        .entry {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.9rem;
+            flex: 1 1 420px;
+            min-width: 0;
+        }
+        .thumb-wrap {
+            width: 120px;
+            aspect-ratio: 4 / 3;
+            flex: 0 0 120px;
+            margin: 0;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #e7e5e4;
+            border: 1px solid rgba(154, 52, 18, 0.12);
+            position: relative;
+        }
+        .thumb-wrap img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .badge {
+            position: absolute;
+            top: 0.45rem;
+            left: 0.45rem;
+            background: rgba(31, 41, 55, 0.8);
+            color: #fff;
+            padding: 0.16rem 0.42rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            letter-spacing: 0.04em;
         }
         .actions {
             display: flex;
@@ -111,6 +150,18 @@
         .empty {
             margin: 0;
             color: var(--muted);
+        }
+        @media (max-width: 720px) {
+            .entry {
+                flex-basis: 100%;
+            }
+            .thumb-wrap {
+                width: 96px;
+                flex-basis: 96px;
+            }
+            .actions {
+                width: 100%;
+            }
         }
     </style>
 </head>
@@ -145,11 +196,17 @@
             <div class="list">
                 {{range .Assets}}
                 <div class="row">
-                    <div class="meta">
-                        <strong>{{.OriginalFilename}}</strong>
-                        <span>类型：{{.MediaType}} · MIME：{{.MIMEType}} · 大小：{{.SizeBytes}}</span>
-                        <span>上传时间：{{.CreatedAt.Format "2006-01-02 15:04:05"}}</span>
-                        <span>删除时间：{{if .DeletedAt}}{{.DeletedAt.Format "2006-01-02 15:04:05"}}{{end}}</span>
+                    <div class="entry">
+                        <figure class="thumb-wrap">
+                            <img src="/trash/{{.ID}}/thumbnail" alt="{{.OriginalFilename}}" loading="lazy">
+                            {{if eq .MediaType "video"}}<span class="badge">VIDEO</span>{{end}}
+                        </figure>
+                        <div class="meta">
+                            <strong title="{{.OriginalFilename}}">{{.OriginalFilename}}</strong>
+                            <span>类型：{{.MediaType}} · MIME：{{.MIMEType}} · 大小：{{.SizeBytes}}</span>
+                            <span>上传时间：{{.CreatedAt.Format "2006-01-02 15:04:05"}}</span>
+                            <span>删除时间：{{if .DeletedAt}}{{.DeletedAt.Format "2006-01-02 15:04:05"}}{{end}}</span>
+                        </div>
                     </div>
                     <div class="actions">
                         <form action="/media/{{.ID}}/restore" method="post" data-confirm-message="确定恢复这个媒体吗？恢复后会重新出现在媒体库中。">

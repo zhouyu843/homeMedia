@@ -435,6 +435,9 @@ func TestDetailListAndTrashRenderProtectedForms(t *testing.T) {
 	if !strings.Contains(trashBody, "/media/asset-2/permanent-delete") {
 		t.Fatalf("expected trash page permanent delete form, got %q", trashBody)
 	}
+	if !strings.Contains(trashBody, "/trash/asset-2/thumbnail") {
+		t.Fatalf("expected trash page thumbnail, got %q", trashBody)
+	}
 	if !strings.Contains(trashBody, "data-confirm-message=\"确定彻底删除这个媒体吗？如果没有其他活跃记录引用同一文件，物理文件也会一起删除。\"") {
 		t.Fatalf("expected trash page permanent delete confirm, got %q", trashBody)
 	}
@@ -848,6 +851,64 @@ func TestThumbnailMediaReturnsJPEG(t *testing.T) {
 	}
 }
 
+func TestTrashThumbnailMediaReturnsJPEGForDeletedAsset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	deletedAt := time.Now().UTC()
+	repo := &memoryRepository{assets: []media.Asset{{
+		ID:               "asset-trashed",
+		OriginalFilename: "photo.png",
+		StoredFilename:   "photo.png",
+		MediaType:        media.MediaTypeImage,
+		MIMEType:         "image/png",
+		SizeBytes:        70,
+		StoragePath:      "20260403/photo.png",
+		CreatedAt:        deletedAt.Add(-time.Hour),
+		DeletedAt:        &deletedAt,
+	}}}
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("local.New returned error: %v", err)
+	}
+
+	storedFile, err := store.Save(context.Background(), "photo.png", bytes.NewReader([]byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0x99, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+		0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
+		0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}))
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	repo.assets[0].StoredFilename = storedFile.StoredFilename
+	repo.assets[0].StoragePath = storedFile.StoragePath
+
+	service := media.NewService(repo, store)
+	handler := NewHandler(service, testTemplates(t), 10*1024*1024, testAuth())
+	router := NewRouter(handler)
+	sessionCookie := loginAndGetSessionCookie(t, router)
+
+	thumbResp := httptest.NewRecorder()
+	thumbReq := httptest.NewRequest(http.MethodGet, "/trash/asset-trashed/thumbnail", nil)
+	thumbReq.AddCookie(sessionCookie)
+	router.ServeHTTP(thumbResp, thumbReq)
+
+	if thumbResp.Code != http.StatusOK {
+		t.Fatalf("expected trash thumbnail status 200, got %d with body %q", thumbResp.Code, thumbResp.Body.String())
+	}
+	if got := thumbResp.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("expected trash thumbnail content type image/jpeg, got %q", got)
+	}
+	if len(thumbResp.Body.Bytes()) == 0 {
+		t.Fatal("expected trash thumbnail body not empty")
+	}
+}
+
 func TestThumbnailMissingFileReturnsPlaceholder(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -957,6 +1018,7 @@ func testTemplates(t *testing.T) *template.Template {
 {{define "trash.html"}}
 {{range .Assets}}
 <span>{{.OriginalFilename}}</span>
+<img src="/trash/{{.ID}}/thumbnail" alt="{{.OriginalFilename}}">
 <form action="/media/{{.ID}}/restore" method="post" data-confirm-message="确定恢复这个媒体吗？恢复后会重新出现在媒体库中。"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"></form>
 <form action="/media/{{.ID}}/permanent-delete" method="post" data-confirm-message="确定彻底删除这个媒体吗？如果没有其他活跃记录引用同一文件，物理文件也会一起删除。"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"></form>
 {{end}}

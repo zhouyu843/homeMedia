@@ -24,6 +24,7 @@ type MediaService interface {
 	Get(ctx context.Context, id string) (media.Asset, error)
 	Download(ctx context.Context, id string) (media.Asset, io.ReadSeekCloser, error)
 	Thumbnail(ctx context.Context, id string) (string, []byte, error)
+	TrashThumbnail(ctx context.Context, id string) (string, []byte, error)
 	Delete(ctx context.Context, id string) error
 	Restore(ctx context.Context, id string) error
 	DeletePermanently(ctx context.Context, id string) error
@@ -360,6 +361,15 @@ func (h Handler) ViewMedia(c *gin.Context) {
 
 func (h Handler) ThumbnailMedia(c *gin.Context) {
 	contentType, thumbnail, err := h.service.Thumbnail(c.Request.Context(), c.Param("id"))
+	h.respondThumbnail(c, contentType, thumbnail, err)
+}
+
+func (h Handler) TrashThumbnailMedia(c *gin.Context) {
+	contentType, thumbnail, err := h.service.TrashThumbnail(c.Request.Context(), c.Param("id"))
+	h.respondThumbnail(c, contentType, thumbnail, err)
+}
+
+func (h Handler) respondThumbnail(c *gin.Context, contentType string, thumbnail []byte, err error) {
 	if err != nil {
 		if errors.Is(err, media.ErrNotFound) || errors.Is(err, media.ErrFileMissing) || errors.Is(err, media.ErrThumbnailGeneration) {
 			c.Header("Cache-Control", "private, max-age=60")

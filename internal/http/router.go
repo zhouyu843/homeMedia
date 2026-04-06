@@ -26,6 +26,7 @@ func NewRouter(handler Handler) *gin.Engine {
 	protected.POST("/logout", handler.Logout)
 	protected.GET("/media", handler.ListMedia)
 	protected.GET("/trash", handler.ListTrash)
+	protected.GET("/trash/:id/thumbnail", handler.TrashThumbnailMedia)
 	protected.GET("/api/media", handler.ListMediaJSON)
 	protected.GET("/media/:id", handler.ShowMedia)
 	protected.GET("/media/:id/view", handler.ViewMedia)

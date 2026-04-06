@@ -138,18 +138,7 @@ func (s Service) Download(ctx context.Context, id string) (Asset, io.ReadSeekClo
 		return Asset{}, nil, err
 	}
 
-	file, err := s.fileStore.Open(asset.StoragePath)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return Asset{}, nil, ErrFileMissing
-		}
-		if errors.Is(err, ErrInvalidStoragePath) {
-			return Asset{}, nil, err
-		}
-		return Asset{}, nil, err
-	}
-
-	return asset, file, nil
+	return s.openAssetFile(asset)
 }
 
 func (s Service) Delete(ctx context.Context, id string) error {
@@ -217,7 +206,41 @@ func (s Service) Thumbnail(ctx context.Context, id string) (string, []byte, erro
 	}
 	defer file.Close()
 
-	thumb, err := generateThumbnailWithFFmpeg(ctx, file, asset.MediaType)
+	return s.generateThumbnail(ctx, file, asset.MediaType)
+}
+
+func (s Service) TrashThumbnail(ctx context.Context, id string) (string, []byte, error) {
+	asset, err := s.repository.FindDeletedByID(ctx, id)
+	if err != nil {
+		return "", nil, err
+	}
+
+	_, file, err := s.openAssetFile(asset)
+	if err != nil {
+		return "", nil, err
+	}
+	defer file.Close()
+
+	return s.generateThumbnail(ctx, file, asset.MediaType)
+}
+
+func (s Service) openAssetFile(asset Asset) (Asset, io.ReadSeekCloser, error) {
+	file, err := s.fileStore.Open(asset.StoragePath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return Asset{}, nil, ErrFileMissing
+		}
+		if errors.Is(err, ErrInvalidStoragePath) {
+			return Asset{}, nil, err
+		}
+		return Asset{}, nil, err
+	}
+
+	return asset, file, nil
+}
+
+func (s Service) generateThumbnail(ctx context.Context, file io.Reader, mediaType MediaType) (string, []byte, error) {
+	thumb, err := generateThumbnailWithFFmpeg(ctx, file, mediaType)
 	if err != nil {
 		return "", nil, err
 	}
