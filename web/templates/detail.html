@@ -119,7 +119,7 @@
         <section class="panel">
             <div class="actions">
                 <a class="download" href="/media/{{.Asset.ID}}/download">下载原文件</a>
-                <form class="delete-form" action="/media/{{.Asset.ID}}/delete" method="post" onsubmit="return confirm('确定将这个媒体移入回收站吗？之后仍可恢复。');">
+                <form class="delete-form" action="/media/{{.Asset.ID}}/delete" method="post">
                     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                     <button class="btn btn-danger" type="submit">移入回收站</button>
                 </form>

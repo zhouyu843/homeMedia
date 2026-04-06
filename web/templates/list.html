@@ -222,7 +222,7 @@
         <section class="gallery">
             {{range .Assets}}
             <article class="card">
-                <form class="card-delete" action="/media/{{.ID}}/delete" method="post" onsubmit="return confirm('确定将这个媒体移入回收站吗？之后仍可恢复。');">
+                <form class="card-delete" action="/media/{{.ID}}/delete" method="post">
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                     <button type="submit">回收</button>
                 </form>

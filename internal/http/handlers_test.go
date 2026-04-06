@@ -353,19 +353,33 @@ func TestDownloadMissingFileReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestDetailAndListRenderDeleteForms(t *testing.T) {
+func TestDetailListAndTrashRenderProtectedForms(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := &memoryRepository{assets: []media.Asset{{
-		ID:               "asset-1",
-		OriginalFilename: "photo.jpg",
-		StoredFilename:   "photo.jpg",
-		MediaType:        media.MediaTypeImage,
-		MIMEType:         "image/jpeg",
-		SizeBytes:        7,
-		StoragePath:      "20260403/photo.jpg",
-		CreatedAt:        time.Now().UTC(),
-	}}}
+	deletedAt := time.Now().UTC()
+	repo := &memoryRepository{assets: []media.Asset{
+		{
+			ID:               "asset-1",
+			OriginalFilename: "photo.jpg",
+			StoredFilename:   "photo.jpg",
+			MediaType:        media.MediaTypeImage,
+			MIMEType:         "image/jpeg",
+			SizeBytes:        7,
+			StoragePath:      "20260403/photo.jpg",
+			CreatedAt:        time.Now().UTC(),
+		},
+		{
+			ID:               "asset-2",
+			OriginalFilename: "trashed-photo.jpg",
+			StoredFilename:   "trashed-photo.jpg",
+			MediaType:        media.MediaTypeImage,
+			MIMEType:         "image/jpeg",
+			SizeBytes:        9,
+			StoragePath:      "20260403/trashed-photo.jpg",
+			CreatedAt:        deletedAt.Add(-time.Hour),
+			DeletedAt:        &deletedAt,
+		},
+	}}
 	store, err := local.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("local.New returned error: %v", err)
@@ -386,6 +400,9 @@ func TestDetailAndListRenderDeleteForms(t *testing.T) {
 	if !strings.Contains(listResp.Body.String(), "/media/asset-1/delete") {
 		t.Fatalf("expected list page delete form, got %q", listResp.Body.String())
 	}
+	if strings.Contains(listResp.Body.String(), "data-confirm-message=") {
+		t.Fatalf("expected list page delete without confirm, got %q", listResp.Body.String())
+	}
 
 	detailResp := httptest.NewRecorder()
 	detailReq := httptest.NewRequest(http.MethodGet, "/media/asset-1", nil)
@@ -396,6 +413,39 @@ func TestDetailAndListRenderDeleteForms(t *testing.T) {
 	}
 	if !strings.Contains(detailResp.Body.String(), "/media/asset-1/delete") {
 		t.Fatalf("expected detail page delete form, got %q", detailResp.Body.String())
+	}
+	if strings.Contains(detailResp.Body.String(), "data-confirm-message=") {
+		t.Fatalf("expected detail page delete without confirm, got %q", detailResp.Body.String())
+	}
+
+	trashResp := httptest.NewRecorder()
+	trashReq := httptest.NewRequest(http.MethodGet, "/trash", nil)
+	trashReq.AddCookie(sessionCookie)
+	router.ServeHTTP(trashResp, trashReq)
+	if trashResp.Code != http.StatusOK {
+		t.Fatalf("expected trash status 200, got %d", trashResp.Code)
+	}
+	trashBody := trashResp.Body.String()
+	if !strings.Contains(trashBody, "/media/asset-2/restore") {
+		t.Fatalf("expected trash page restore form, got %q", trashBody)
+	}
+	if !strings.Contains(trashBody, "data-confirm-message=\"确定恢复这个媒体吗？恢复后会重新出现在媒体库中。\"") {
+		t.Fatalf("expected trash page restore confirm, got %q", trashBody)
+	}
+	if !strings.Contains(trashBody, "/media/asset-2/permanent-delete") {
+		t.Fatalf("expected trash page permanent delete form, got %q", trashBody)
+	}
+	if !strings.Contains(trashBody, "data-confirm-message=\"确定彻底删除这个媒体吗？如果没有其他活跃记录引用同一文件，物理文件也会一起删除。\"") {
+		t.Fatalf("expected trash page permanent delete confirm, got %q", trashBody)
+	}
+	if !strings.Contains(trashBody, "/trash/empty") {
+		t.Fatalf("expected trash page empty form, got %q", trashBody)
+	}
+	if !strings.Contains(trashBody, "data-confirm-message=\"确定清空回收站吗？其中的媒体记录会被彻底删除。\"") {
+		t.Fatalf("expected trash page empty confirm, got %q", trashBody)
+	}
+	if !strings.Contains(trashBody, "/static/js/confirm-dialog.js") {
+		t.Fatalf("expected trash page confirm script, got %q", trashBody)
 	}
 }
 
@@ -907,10 +957,11 @@ func testTemplates(t *testing.T) *template.Template {
 {{define "trash.html"}}
 {{range .Assets}}
 <span>{{.OriginalFilename}}</span>
-<form action="/media/{{.ID}}/restore" method="post"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"></form>
-<form action="/media/{{.ID}}/permanent-delete" method="post"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"></form>
+<form action="/media/{{.ID}}/restore" method="post" data-confirm-message="确定恢复这个媒体吗？恢复后会重新出现在媒体库中。"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"></form>
+<form action="/media/{{.ID}}/permanent-delete" method="post" data-confirm-message="确定彻底删除这个媒体吗？如果没有其他活跃记录引用同一文件，物理文件也会一起删除。"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"></form>
 {{end}}
-<form action="/trash/empty" method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
+<form action="/trash/empty" method="post" data-confirm-message="确定清空回收站吗？其中的媒体记录会被彻底删除。"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
+<script src="/static/js/confirm-dialog.js?v=20260406-2" defer></script>
 {{end}}
 {{define "login.html"}}
 {{if .Error}}<p>{{.Error}}</p>{{end}}
