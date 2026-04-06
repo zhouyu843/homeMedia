@@ -226,7 +226,7 @@ function MediaListPage({
   };
 
   return (
-    <PageLayout session={session} onSessionChange={onSessionChange} title="媒体库" subtitle="上传、预览、下载与删除都由 API 驱动。">
+    <PageLayout session={session} onSessionChange={onSessionChange} title="媒体库">
       {session.status && <UploadIslandApp config={buildUploadConfig(session.status)} onUploadResolved={handleUploadResolved} />}
       {error && <p className="page-error">{error}</p>}
       {loading ? (
@@ -424,7 +424,7 @@ function TrashPage({
   };
 
   return (
-    <PageLayout session={session} onSessionChange={onSessionChange} title="回收站" subtitle="恢复、彻底删除和清空操作全部走 JSON API。">
+    <PageLayout session={session} onSessionChange={onSessionChange} title="回收站">
       <div className="page-toolbar">
         <button type="button" onClick={() => void handleEmpty()} disabled={assets.length === 0}>
           清空回收站
@@ -470,7 +470,7 @@ function PageLayout({
   session: SessionState;
   onSessionChange: React.Dispatch<React.SetStateAction<SessionState>>;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   children: React.ReactNode;
 }) {
   const navigate = useNavigate();
@@ -501,7 +501,7 @@ function PageLayout({
         <div>
           <p className="eyebrow">HomeMedia</p>
           <h1>{title}</h1>
-          <p className="page-subtitle">{subtitle}</p>
+          {subtitle && <p className="page-subtitle">{subtitle}</p>}
         </div>
         <div className="header-actions">
           {location.pathname !== "/media" && (
