@@ -48,7 +48,7 @@ func (a *AuthService) AuthenticateCredentials(username string, password string) 
 	return subtle.ConstantTimeCompare([]byte(password), []byte(a.adminPassword)) == 1
 }
 
-func (a *AuthService) StartSession(c *gin.Context, username string) {
+func (a *AuthService) StartSession(c *gin.Context, username string) string {
 	expiresAt := time.Now().UTC().Add(a.sessionTTL).Unix()
 	payload := username + "|" + strconv.FormatInt(expiresAt, 10)
 	sig := a.sign(payload)
@@ -56,6 +56,7 @@ func (a *AuthService) StartSession(c *gin.Context, username string) {
 
 	maxAge := int(a.sessionTTL.Seconds())
 	c.SetCookie(sessionCookieName, value, maxAge, "/", "", false, true)
+	return a.sessionCSRFTokenFromValue(value)
 }
 
 func (a *AuthService) EndSession(c *gin.Context) {
@@ -68,9 +69,13 @@ func (a *AuthService) SessionCSRFToken(r *http.Request) (string, bool) {
 		return "", false
 	}
 
+	return a.sessionCSRFTokenFromValue(cookie.Value), true
+}
+
+func (a *AuthService) sessionCSRFTokenFromValue(cookieValue string) string {
 	mac := hmac.New(sha256.New, a.sessionSecret)
-	_, _ = mac.Write([]byte("csrf|" + cookie.Value))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), true
+	_, _ = mac.Write([]byte("csrf|" + cookieValue))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func (a *AuthService) VerifySessionCSRF(r *http.Request, token string) bool {
@@ -153,6 +158,10 @@ func (a *AuthService) currentUser(r *http.Request) (string, bool) {
 	return payloadParts[0], true
 }
 
+func (a *AuthService) CurrentUser(r *http.Request) (string, bool) {
+	return a.currentUser(r)
+}
+
 func (a *AuthService) sign(payload string) []byte {
 	mac := hmac.New(sha256.New, a.sessionSecret)
 	_, _ = mac.Write([]byte(payload))
@@ -162,6 +171,12 @@ func (a *AuthService) sign(payload string) []byte {
 func (a *AuthService) RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !a.IsAuthenticated(c.Request) {
+			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+				c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "authentication required"})
+				c.Abort()
+				return
+			}
+
 			c.Redirect(http.StatusSeeOther, "/login")
 			c.Abort()
 			return

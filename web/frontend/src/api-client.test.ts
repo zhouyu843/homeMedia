@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBytes, validateFile, type UploadConfig } from "./api-client";
+import { buildUploadConfig, formatBytes, validateFile, type AuthStatusResponse, type UploadConfig } from "./api-client";
 
 function makeConfig(overrides?: Partial<UploadConfig>): UploadConfig {
   return {
@@ -36,5 +36,21 @@ describe("formatBytes", () => {
   it("formats byte units", () => {
     expect(formatBytes(512)).toBe("512 B");
     expect(formatBytes(2048)).toBe("2.0 KB");
+  });
+});
+
+describe("buildUploadConfig", () => {
+  it("builds upload config from auth status", () => {
+    const status: AuthStatusResponse = {
+      authenticated: true,
+      csrfToken: "csrf-token",
+      maxUploadBytes: 2048,
+      allowedMimeTypes: ["image/jpeg", "video/mp4"]
+    };
+
+    const config = buildUploadConfig(status);
+    expect(config.csrfToken).toBe("csrf-token");
+    expect(config.maxUploadBytes).toBe(2048);
+    expect(config.allowedMimeTypes.has("video/mp4")).toBe(true);
   });
 });

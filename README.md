@@ -1,91 +1,111 @@
 # HomeMedia
 
-一个最小可用的私有照片和视频上传/查看/下载项目。
+一个以长期维护为导向的私有照片和视频管理项目。
 
-当前版本已增加基础登录保护，媒体相关页面和上传/下载接口都需要登录后访问。
+当前版本已经移除服务端模板渲染页面，前端统一为 React + TypeScript 单页应用，后端专注于认证、JSON API、媒体文件流、缩略图和本地存储。项目仍保持单体部署：Go 作为唯一运行时入口，负责托管前端构建产物。
 
-当前版本聚焦 MVP，只提供几条核心链路：
-- 上传图片和视频
+## 当前能力
+
+- 管理员登录与登出
+- React SPA 登录页、媒体列表页、详情页、回收站页
+- 图片和视频上传
 - 列表页整页拖拽上传
-- 浏览媒体列表
-- 列表缩略图预览（图片和视频）
-- 查看单个媒体详情并直接预览图片/视频
-- 下载原始文件
-- 精确内容去重（基于文件内容 SHA-256）
-- 登录/登出（单管理员账号）
+- 图片和视频缩略图预览
+- 单个媒体详情预览
+- 原始文件下载
+- 逻辑删除、恢复、彻底删除、清空回收站
+- 基于文件内容 SHA-256 的精确去重
 
-详情页行为说明：
-- 访问 `/media/:id` 进入详情页，页面内嵌预览图片或视频。
-- 访问 `/media/:id/thumbnail` 获取媒体缩略图（JPEG）。
-- 访问 `/media/:id/download` 下载原始文件。
+## 架构概览
 
-删除媒体行为说明：
-- 列表页和详情页都提供“移入回收站”入口，提交后会先做逻辑删除，不会立即移除宿主机原始文件。
-- 已删除媒体不会再出现在主列表，也不能通过详情、预览、下载和缩略图接口继续访问。
-- 回收站页面位于 `GET /trash`，支持恢复、单项彻底删除、清空回收站；这三种操作都会先弹出确认对话框，取消后不会提交。回收站列表会在每条记录前显示缩略图，便于快速辨认图片和视频。
-- 单项彻底删除或清空回收站时，若该媒体文件没有被其他活跃记录引用，会同时删除宿主机上的原始文件。
-- 为兼容历史数据，如果还有其他活跃记录复用同一个 `storage_path`，本次只删除当前回收站记录，不删除共享物理文件。
-- 删除操作需要已登录会话，并通过会话 CSRF token 校验。
-- 自动过期清理和定时回收任务暂未实现，当前由用户显式管理回收站。
+前端：
+- React 18
+- TypeScript
+- Vite
+- React Router
 
-上传去重行为说明：
-- 上传时会基于文件二进制内容计算 SHA-256 做精确去重，不按文件名判重。
-- 内容相同但文件名不同：复用已有媒体资源，不重复保存物理文件。
-- 文件名相同但内容不同：视为不同媒体，允许共存。
-- JSON 上传接口 `POST /api/uploads` 在新建时返回 `201`，命中重复内容时返回 `200`，响应体会包含 `existing` 布尔字段。
-- 如果相同内容的资源已经在回收站中，React 上传增强会收到 `409` + `trashed_duplicate`，并提示用户选择“恢复旧项”或“继续新建”。
-- 普通表单上传不做这一步交互；命中回收站同内容时默认按“继续新建”处理。
-- 前端上传增强区域会把“新上传成功”和“文件已存在，已复用”区分展示；命中已存在资源时不会重复插入列表卡片。
-- 前端上传增强区域在命中回收站同内容时，会把“等待选择”“已恢复旧项”与普通上传成功分开反馈。
-- 前端上传增强区域在上传成功后会自动把成功项目从待处理列表移除，失败项目保留以便重试。
-- 拖拽加入的待处理文件列表按单项单行展示，便于连续检查每个文件状态。
-- 历史数据如果尚未写入 `content_hash`，系统会在后续遇到同大小文件上传时尝试按内容懒匹配并回填哈希。
-
-修改代码后的生效步骤：
-- 如果容器还没启动，直接执行 `docker compose up --build` 即可；服务会按当前代码和配置启动。
-- 如果开发环境已经在运行，Go 代码、模板、migration 等修改通常不需要重建 Docker 镜像，因为 `app` 服务通过 `./:/app` 挂载了本地代码。
-- 改了数据库 migration 后，先执行 `docker compose run --rm migrate`。
-- 改了 Go 后端代码后，执行 `docker compose restart app` 让应用进程重新启动并加载最新代码。
-- 改了前端静态资源或 React 岛屿代码后，需要重新构建前端资源，例如执行 `make frontend-build`。
-- 改了 Go 依赖、Dockerfile、系统包或基础镜像后，执行 `docker compose up -d --build` 重新构建并启动容器。
-- 变更完成后，建议执行 `docker compose run --rm app go test ./...`，前端改动可额外执行 `make frontend-test` 做回归验证。
-
-常见的增量更新命令：
-
-```bash
-docker compose run --rm migrate
-docker compose restart app
-docker compose run --rm app go test ./...
-```
-
-鉴权行为说明：
-- 访问 `/login` 打开登录页。
-- 访问 `/media`、`/trash`、`/media/:id`、`/media/:id/view`、`/media/:id/thumbnail`、`/media/:id/download`、`/uploads` 需要已登录会话。
-- 前端上传增强接口：`GET /api/media`、`POST /api/uploads`（同样需要已登录会话）。
-- 退出登录使用 `POST /logout`。
-
-## 技术栈
-
+后端：
 - Go 1.24
 - Gin
 - PostgreSQL 16
 - 本地文件存储
 - Docker Compose
-- React 18（局部交互岛屿）
-- TypeScript + Vite（前端子工程构建）
+
+职责分界：
+- React 负责页面渲染、路由切换、上传交互、列表与详情展示。
+- Go 负责 Cookie Session、CSRF、限流、媒体领域逻辑、JSON API、预览/下载/缩略图文件流、前端静态资源托管。
+- PostgreSQL 只保存元数据；原始文件固定保存在挂载目录。
+
+## 路由说明
+
+SPA 页面路由：
+- `GET /login`
+- `GET /media`
+- `GET /media/:id`
+- `GET /trash`
+
+这些路由都返回前端 SPA 入口文件，由 React Router 接管页面渲染。
+
+文件流与缩略图路由：
+- `GET /media/:id/view`
+- `GET /media/:id/download`
+- `GET /media/:id/thumbnail`
+- `GET /trash/:id/thumbnail`
+
+JSON API：
+- `GET /api/auth/status`
+- `POST /api/login`
+- `POST /api/logout`
+- `GET /api/media`
+- `GET /api/media/:id`
+- `GET /api/trash`
+- `POST /api/uploads`
+- `POST /api/media/:id/delete`
+- `POST /api/media/:id/restore`
+- `POST /api/media/:id/permanent-delete`
+- `POST /api/trash/empty`
+
+## 鉴权与安全
+
+- 页面和 API 继续使用 Go 侧 Cookie Session。
+- 登录前通过 `GET /api/auth/status` 获取登录 CSRF token。
+- 已登录状态下通过同一接口获取会话 CSRF token。
+- 上传、登出、删除、恢复、彻底删除、清空回收站都要求有效会话与 CSRF token。
+- 登录与上传接口仍保留 IP 限流。
+- 预览、下载和缩略图接口同样受登录态保护。
+
+## 上传与去重行为
+
+- 上传时基于二进制内容计算 SHA-256 做精确去重。
+- 内容相同但文件名不同：复用已有媒体资源，不重复保存物理文件。
+- 文件名相同但内容不同：视为不同媒体，允许共存。
+- `POST /api/uploads`：
+  - 新建资源返回 `201`
+  - 命中活跃重复内容返回 `200` 且 `existing=true`
+  - 命中回收站重复内容返回 `409` 且 `code=trashed_duplicate`
+- 前端上传面板支持在命中回收站重复内容时选择“恢复旧项”或“继续新建”。
+- 历史数据如果尚未写入 `content_hash`，系统会在后续遇到同大小文件上传时尝试按内容懒匹配并回填哈希。
+
+## 删除与回收站行为
+
+- 删除操作为逻辑删除，先移入回收站，不立即删除宿主机原始文件。
+- 已删除媒体不会再出现在主列表，也不能通过详情、预览、下载和主缩略图接口访问。
+- 回收站支持恢复、单项彻底删除、清空回收站。
+- 彻底删除时，如果该物理文件没有被其他活跃记录引用，会同时删除宿主机文件。
+- 如果还有其他活跃记录复用同一个 `storage_path`，只删除当前回收站记录，不删除共享物理文件。
 
 ## 目录说明
 
 - `cmd/server`：应用入口
 - `internal/config`：环境变量配置
-- `internal/media`：媒体领域模型和业务服务
-- `internal/http`：Gin 路由和处理器
+- `internal/http`：Gin 路由、认证、API handler
+- `internal/media`：媒体领域模型与业务服务
 - `internal/repository/postgres`：PostgreSQL 仓储实现
 - `internal/storage/local`：本地文件存储实现
 - `migrations`：数据库迁移脚本
-- `web/templates`：服务端渲染页面
-- `web/frontend`：React + TypeScript 前端子工程（上传交互增强）
-- `web/static`：Gin 托管的静态资源（包含前端构建产物）
+- `web/frontend`：React + TypeScript 前端工程
+- `web/static`：Gin 托管的静态资源与前端构建产物
+- `web/static/app`：Vite SPA 构建输出目录
 
 ## 快速开始
 
@@ -95,7 +115,7 @@ docker compose run --rm app go test ./...
 cp .env.example .env
 ```
 
-2. 上传文件会保存到项目根目录下的 `data/uploads/`，目录不存在时请先创建：
+2. 创建上传目录：
 
 ```bash
 mkdir -p data/uploads
@@ -107,40 +127,47 @@ mkdir -p data/uploads
 docker compose up --build
 ```
 
-4. 打开浏览器：
-
-```text
-http://127.0.0.1:8080/login
-```
-
-5. 使用 `.env` 中的管理员账号密码登录。
-
-6. （可选）构建 React 岛屿前端资源：
+4. 安装前端依赖并构建 SPA：
 
 ```bash
 make frontend-install
 make frontend-build
 ```
 
-说明：列表页会尝试加载 `/static/react/upload-island.js`。如果未执行前端构建，核心 SSR 功能仍可用，但上传区 React 增强不会生效。
-前端开发服务器端口默认为 `5175`，对应容器端口映射 `5175:5175`。
+5. 打开浏览器：
 
-## 环境变量
+```text
+http://127.0.0.1:8080/login
+```
 
-基础运行配置：
-- `APP_PORT`：服务端口（默认 `8080`）
-- `DATABASE_URL`：PostgreSQL 连接串
-- `MAX_UPLOAD_SIZE_MB`：上传大小上限（MB）
+6. 使用 `.env` 中的管理员账号密码登录。
 
-认证与会话配置：
-- `ADMIN_USERNAME`：管理员用户名（默认 `admin`）
-- `ADMIN_PASSWORD`：管理员密码（必填）
-- `SESSION_SECRET`：会话签名密钥（必填）
-- `SESSION_TTL_HOURS`：会话有效时长（小时，默认 `24`）
+说明：
+- Go 服务会托管 `web/static/app` 下的前端构建产物。
+- 如果修改了前端代码，需要重新执行 `make frontend-build`。
+- 前端开发服务器默认端口为 `5175`，映射为 `5175:5175`。
+
+## 开发工作流
+
+常见增量命令：
+
+```bash
+docker compose run --rm migrate
+docker compose restart app
+docker compose run --rm app go test ./...
+make frontend-test
+make frontend-build
+```
+
+适用场景：
+- 修改数据库 migration：执行 `docker compose run --rm migrate`
+- 修改 Go 后端代码：执行 `docker compose restart app`
+- 修改 React/TypeScript 前端代码：执行 `make frontend-build`
+- 修改 Go 依赖、Dockerfile、系统包或基础镜像：执行 `docker compose up -d --build`
 
 ## 常用命令
 
-运行测试：
+运行后端测试：
 
 ```bash
 docker compose run --rm app go test ./...
@@ -158,22 +185,16 @@ make frontend-test
 make frontend-install
 ```
 
-构建前端资源：
+构建前端：
 
 ```bash
 make frontend-build
 ```
 
-启动前端开发服务器（容器内）：
+启动前端开发服务器：
 
 ```bash
 make frontend-dev
-```
-
-格式化代码：
-
-```bash
-docker compose run --rm app sh -c 'gofmt -w ./cmd ./internal'
 ```
 
 单独执行迁移：
@@ -200,6 +221,21 @@ docker compose exec postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 docker compose down
 ```
 
+说明：当前 `app` 容器内未验证 `gofmt` 可用，因此不要默认依赖 `make fmt` 风格的容器化格式化步骤，优先以测试和构建通过为准，必要时再补齐工具链。
+
+## 环境变量
+
+基础运行配置：
+- `APP_PORT`：服务端口，默认 `8080`
+- `DATABASE_URL`：PostgreSQL 连接串
+- `MAX_UPLOAD_SIZE_MB`：上传大小上限（MB）
+
+认证与会话配置：
+- `ADMIN_USERNAME`：管理员用户名，默认 `admin`
+- `ADMIN_PASSWORD`：管理员密码，必填
+- `SESSION_SECRET`：会话签名密钥，必填
+- `SESSION_TTL_HOURS`：会话有效时长，默认 `24`
+
 ## 当前能力边界
 
 当前不包含这些功能：
@@ -210,23 +246,16 @@ docker compose down
 - 分享链接
 - 异步任务系统
 
-前端集成边界（当前阶段）：
-- 仍以 Go + SSR 为主体，不做整站 SPA。
-- React 仅用于高交互区域（当前从列表页上传区开始）。
-- 已支持上传岛屿增强版：多文件选择、拖拽高亮、图片本地预览/视频占位、客户端类型/大小校验、逐文件上传状态、总体进度、失败重试、上传成功后列表即时插入、最近上传结果反馈、命中回收站重复内容时的恢复/继续新建二选一。
-- 列表页支持将文件拖到整个页面范围内触发上传，成功项会自动退出待处理队列。
-- 会话认证、CSRF、防刷限流仍由后端负责。
+## 安全说明
 
-## 安全说明（当前版本）
-
-- 已启用基础会话认证、CSRF 校验（登录/上传/登出表单）和登录/上传接口限流。
+- 已启用基础会话认证、CSRF 校验和登录/上传接口限流。
 - 已移除详情页中的内部存储路径展示。
-- 推荐通过 Tailscale/ZeroTier 或受控反向代理访问，不建议直接裸露到公网。
+- 推荐通过 Tailscale、ZeroTier 或受控反向代理访问，不建议直接裸露到公网。
 
 ## 开发说明
 
 - PostgreSQL 只存元数据，不存文件二进制。
-- 原始文件固定保存到宿主机的 `./data/uploads/`，容器内固定路径为 `/data/uploads`。
+- 原始文件固定保存到宿主机 `./data/uploads/`，容器内路径为 `/data/uploads`。
 - 应用容器包含 `ffmpeg`，用于生成图片和视频缩略图。
 - 当前开发环境以 Docker Compose 为准。
-- 宿主机如果没有 Go 工具链，可以直接通过容器执行测试和格式化。
+- 宿主机如果没有 Go 工具链，可以通过容器执行测试和前端命令。

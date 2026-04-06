@@ -78,12 +78,13 @@ describe("UploadIslandApp", () => {
   });
 
   it("removes successful items from queue and keeps recent result", async () => {
+    const onUploadResolved = vi.fn();
     uploadFileMock.mockResolvedValue({
       asset: makeAsset(),
       existing: false
     });
 
-    const { container } = render(React.createElement(UploadIslandApp, { config: makeConfig() }));
+    const { container } = render(React.createElement(UploadIslandApp, { config: makeConfig(), onUploadResolved }));
 
     const input = screen.getByLabelText("选择要上传的文件") as HTMLInputElement;
     const file = makeFile("success.jpg");
@@ -100,7 +101,10 @@ describe("UploadIslandApp", () => {
     expect(screen.getByText("最近上传结果")).toBeTruthy();
     expect(within(screen.getByText("最近上传结果").closest("div") as HTMLElement).getByText("success.jpg")).toBeTruthy();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:preview");
-    expect(document.querySelector('.gallery .card[href="/media/asset-1"]')).toBeTruthy();
+    expect(onUploadResolved).toHaveBeenCalledWith({
+      asset: makeAsset(),
+      existing: false
+    });
   });
 
   it("keeps failed items in queue and allows retry", async () => {
@@ -130,6 +134,7 @@ describe("UploadIslandApp", () => {
   });
 
   it("offers restore choice for trashed duplicate uploads", async () => {
+    const onUploadResolved = vi.fn();
     const duplicateError = Object.assign(new Error("发现回收站中的同内容文件，请选择恢复旧项或继续新建"), {
       code: "trashed_duplicate",
       asset: makeAsset({ id: "asset-deleted", detailUrl: "/media/asset-deleted" })
@@ -141,7 +146,7 @@ describe("UploadIslandApp", () => {
       restored: true
     });
 
-    const { container } = render(React.createElement(UploadIslandApp, { config: makeConfig() }));
+    const { container } = render(React.createElement(UploadIslandApp, { config: makeConfig(), onUploadResolved }));
 
     const input = screen.getByLabelText("选择要上传的文件") as HTMLInputElement;
     fireEvent.change(input, { target: { files: [makeFile("restore.jpg")] } });
@@ -159,6 +164,11 @@ describe("UploadIslandApp", () => {
     expect(uploadFileMock).toHaveBeenNthCalledWith(2, expect.anything(), expect.any(File), expect.any(Function), "restore");
     expect(screen.getByText("最近上传结果")).toBeTruthy();
     expect(within(screen.getByText("最近上传结果").closest("div") as HTMLElement).getAllByText("restore.jpg").length).toBeGreaterThan(0);
+    expect(onUploadResolved).toHaveBeenCalledWith({
+      asset: makeAsset({ id: "asset-deleted", detailUrl: "/media/asset-deleted" }),
+      existing: false,
+      restored: true
+    });
   });
 
   it("accepts file drop from the whole page", async () => {

@@ -2,14 +2,13 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,17 +32,17 @@ type MediaService interface {
 
 type Handler struct {
 	service        MediaService
-	templates      *template.Template
 	maxUploadBytes int64
 	auth           *AuthService
+	spaEntryPath   string
 }
 
-func NewHandler(service MediaService, templates *template.Template, maxUploadBytes int64, auth *AuthService) Handler {
+func NewHandler(service MediaService, maxUploadBytes int64, auth *AuthService, spaEntryPath string) Handler {
 	return Handler{
 		service:        service,
-		templates:      templates,
 		maxUploadBytes: maxUploadBytes,
 		auth:           auth,
+		spaEntryPath:   spaEntryPath,
 	}
 }
 
@@ -62,87 +61,95 @@ func (h Handler) LoginPage(c *gin.Context) {
 		return
 	}
 
-	h.renderLogin(c, http.StatusOK, "")
+	h.serveSPA(c)
 }
 
-func (h Handler) LoginSubmit(c *gin.Context) {
+func (h Handler) AuthStatus(c *gin.Context) {
+	username, authenticated := h.auth.CurrentUser(c.Request)
+	csrfToken := ""
+
+	if authenticated {
+		var ok bool
+		csrfToken, ok = h.auth.SessionCSRFToken(c.Request)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, apiErrorResponse{Code: "unauthorized", Message: "authentication required"})
+			return
+		}
+	} else {
+		var err error
+		csrfToken, err = h.auth.IssueLoginCSRF(c)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, apiErrorResponse{Code: "internal_error", Message: "issue csrf failed"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, authStatusResponse{
+		Authenticated:    authenticated,
+		Username:         username,
+		CSRFToken:        csrfToken,
+		MaxUploadBytes:   h.maxUploadBytes,
+		AllowedMimeTypes: media.AllowedUploadMIMETypes(),
+	})
+}
+
+func (h Handler) LoginJSON(c *gin.Context) {
 	if h.auth.IsAuthenticated(c.Request) {
-		c.Redirect(http.StatusSeeOther, "/media")
+		username, _ := h.auth.CurrentUser(c.Request)
+		csrfToken, _ := h.auth.SessionCSRFToken(c.Request)
+		c.JSON(http.StatusOK, authStatusResponse{
+			Authenticated:    true,
+			Username:         username,
+			CSRFToken:        csrfToken,
+			MaxUploadBytes:   h.maxUploadBytes,
+			AllowedMimeTypes: media.AllowedUploadMIMETypes(),
+		})
 		return
 	}
 
-	if !h.auth.VerifyLoginCSRF(c.Request, c.PostForm("csrf_token")) {
-		c.String(http.StatusForbidden, "invalid csrf token")
+	var input loginRequest
+	if err := json.NewDecoder(c.Request.Body).Decode(&input); err != nil {
+		c.JSON(http.StatusBadRequest, apiErrorResponse{Code: "invalid_payload", Message: "invalid login payload"})
 		return
 	}
 
-	username := c.PostForm("username")
-	password := c.PostForm("password")
-	if !h.auth.AuthenticateCredentials(username, password) {
-		h.renderLogin(c, http.StatusUnauthorized, "用户名或密码错误")
+	if !h.auth.VerifyLoginCSRF(c.Request, input.CSRFToken) {
+		c.JSON(http.StatusForbidden, apiErrorResponse{Code: "invalid_csrf", Message: "invalid csrf token"})
 		return
 	}
 
-	h.auth.StartSession(c, username)
+	if !h.auth.AuthenticateCredentials(input.Username, input.Password) {
+		c.JSON(http.StatusUnauthorized, apiErrorResponse{Code: "invalid_credentials", Message: "用户名或密码错误"})
+		return
+	}
+
+	csrfToken := h.auth.StartSession(c, input.Username)
 	h.auth.ClearLoginCSRF(c)
-	c.Redirect(http.StatusSeeOther, "/media")
+	c.JSON(http.StatusOK, authStatusResponse{
+		Authenticated:    true,
+		Username:         input.Username,
+		CSRFToken:        csrfToken,
+		MaxUploadBytes:   h.maxUploadBytes,
+		AllowedMimeTypes: media.AllowedUploadMIMETypes(),
+	})
 }
 
-func (h Handler) Logout(c *gin.Context) {
-	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
-		c.String(http.StatusForbidden, "invalid csrf token")
+func (h Handler) LogoutJSON(c *gin.Context) {
+	if !h.auth.VerifySessionCSRF(c.Request, h.requestCSRFToken(c)) {
+		c.JSON(http.StatusForbidden, apiErrorResponse{Code: "invalid_csrf", Message: "invalid csrf token"})
 		return
 	}
 
 	h.auth.EndSession(c)
-	c.Redirect(http.StatusSeeOther, "/login")
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (h Handler) ListMedia(c *gin.Context) {
-	assets, err := h.service.List(c.Request.Context())
-	if err != nil {
-		c.String(http.StatusInternalServerError, "list media failed")
-		return
-	}
-
-	csrfToken, ok := h.auth.SessionCSRFToken(c.Request)
-	if !ok {
-		c.String(http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	c.Status(http.StatusOK)
-	if err := h.templates.ExecuteTemplate(c.Writer, "list.html", gin.H{
-		"Assets":              assets,
-		"CSRFToken":           csrfToken,
-		"MaxUploadBytes":      h.maxUploadBytes,
-		"AllowedMIMETypes":    media.AllowedUploadMIMETypes(),
-		"AllowedMIMETypesCSV": strings.Join(media.AllowedUploadMIMETypes(), ","),
-	}); err != nil {
-		c.String(http.StatusInternalServerError, "render list failed")
-	}
+	h.serveSPA(c)
 }
 
 func (h Handler) ListTrash(c *gin.Context) {
-	assets, err := h.service.ListTrash(c.Request.Context())
-	if err != nil {
-		c.String(http.StatusInternalServerError, "list trash failed")
-		return
-	}
-
-	csrfToken, ok := h.auth.SessionCSRFToken(c.Request)
-	if !ok {
-		c.String(http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	c.Status(http.StatusOK)
-	if err := h.templates.ExecuteTemplate(c.Writer, "trash.html", gin.H{
-		"Assets":     assets,
-		"CSRFToken": csrfToken,
-	}); err != nil {
-		c.String(http.StatusInternalServerError, "render trash failed")
-	}
+	h.serveSPA(c)
 }
 
 func (h Handler) ListMediaJSON(c *gin.Context) {
@@ -160,53 +167,33 @@ func (h Handler) ListMediaJSON(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"assets": result})
 }
 
-func (h Handler) ShowMedia(c *gin.Context) {
-	asset, err := h.service.Get(c.Request.Context(), c.Param("id"))
+func (h Handler) ListTrashJSON(c *gin.Context) {
+	assets, err := h.service.ListTrash(c.Request.Context())
 	if err != nil {
-		h.writeMediaError(c, err)
+		c.JSON(http.StatusInternalServerError, apiErrorResponse{Code: "internal_error", Message: "list trash failed"})
 		return
 	}
 
-	csrfToken, ok := h.auth.SessionCSRFToken(c.Request)
-	if !ok {
-		c.String(http.StatusUnauthorized, "unauthorized")
-		return
+	result := make([]mediaAssetResponse, 0, len(assets))
+	for _, asset := range assets {
+		result = append(result, toTrashMediaAssetResponse(asset))
 	}
 
-	c.Status(http.StatusOK)
-	if err := h.templates.ExecuteTemplate(c.Writer, "detail.html", gin.H{
-		"Asset":     asset,
-		"CSRFToken": csrfToken,
-	}); err != nil {
-		c.String(http.StatusInternalServerError, "render detail failed")
-	}
+	c.JSON(http.StatusOK, gin.H{"assets": result})
 }
 
-func (h Handler) UploadMedia(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, h.maxUploadBytes)
-	if err := c.Request.ParseMultipartForm(h.maxUploadBytes); err != nil {
-		c.String(http.StatusBadRequest, "invalid upload payload")
-		return
-	}
-
-	if !h.auth.VerifySessionCSRF(c.Request, h.uploadCSRFToken(c)) {
-		c.String(http.StatusForbidden, "invalid csrf token")
-		return
-	}
-
-	fileHeader, err := c.FormFile("file")
+func (h Handler) GetMediaJSON(c *gin.Context) {
+	asset, err := h.service.Get(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		c.String(http.StatusBadRequest, "file is required")
+		h.writeMediaErrorJSON(c, err)
 		return
 	}
 
-	result, err := h.uploadFromHeader(c, fileHeader, media.DuplicateActionNew)
-	if err != nil {
-		h.writeMediaError(c, err)
-		return
-	}
+	c.JSON(http.StatusOK, gin.H{"asset": toMediaAssetResponse(asset)})
+}
 
-	c.Redirect(http.StatusSeeOther, "/media/"+result.Asset.ID)
+func (h Handler) ShowMedia(c *gin.Context) {
+	h.serveSPA(c)
 }
 
 func (h Handler) UploadMediaJSON(c *gin.Context) {
@@ -216,7 +203,7 @@ func (h Handler) UploadMediaJSON(c *gin.Context) {
 		return
 	}
 
-	if !h.auth.VerifySessionCSRF(c.Request, h.uploadCSRFToken(c)) {
+	if !h.auth.VerifySessionCSRF(c.Request, h.requestCSRFToken(c)) {
 		c.JSON(http.StatusForbidden, apiErrorResponse{Code: "invalid_csrf", Message: "invalid csrf token"})
 		return
 	}
@@ -243,9 +230,7 @@ func (h Handler) UploadMediaJSON(c *gin.Context) {
 	}
 
 	status := http.StatusCreated
-	if result.Existing {
-		status = http.StatusOK
-	} else if result.Restored {
+	if result.Existing || result.Restored {
 		status = http.StatusOK
 	}
 
@@ -256,81 +241,60 @@ func (h Handler) UploadMediaJSON(c *gin.Context) {
 	})
 }
 
-func (h Handler) DeleteMedia(c *gin.Context) {
-	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
-		c.String(http.StatusForbidden, "invalid csrf token")
+func (h Handler) DeleteMediaJSON(c *gin.Context) {
+	if !h.auth.VerifySessionCSRF(c.Request, h.requestCSRFToken(c)) {
+		c.JSON(http.StatusForbidden, apiErrorResponse{Code: "invalid_csrf", Message: "invalid csrf token"})
 		return
 	}
 
 	if err := h.service.Delete(c.Request.Context(), c.Param("id")); err != nil {
-		h.writeMediaError(c, err)
+		h.writeMediaErrorJSON(c, err)
 		return
 	}
 
-	c.Redirect(http.StatusSeeOther, "/media")
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-func (h Handler) RestoreMedia(c *gin.Context) {
-	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
-		c.String(http.StatusForbidden, "invalid csrf token")
+func (h Handler) RestoreMediaJSON(c *gin.Context) {
+	if !h.auth.VerifySessionCSRF(c.Request, h.requestCSRFToken(c)) {
+		c.JSON(http.StatusForbidden, apiErrorResponse{Code: "invalid_csrf", Message: "invalid csrf token"})
 		return
 	}
 
 	if err := h.service.Restore(c.Request.Context(), c.Param("id")); err != nil {
-		h.writeMediaError(c, err)
+		h.writeMediaErrorJSON(c, err)
 		return
 	}
 
-	if strings.HasPrefix(c.Request.URL.Path, "/api/") {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-		return
-	}
-
-	c.Redirect(http.StatusSeeOther, "/trash")
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-func (h Handler) DeleteMediaPermanently(c *gin.Context) {
-	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
-		c.String(http.StatusForbidden, "invalid csrf token")
+func (h Handler) DeleteMediaPermanentlyJSON(c *gin.Context) {
+	if !h.auth.VerifySessionCSRF(c.Request, h.requestCSRFToken(c)) {
+		c.JSON(http.StatusForbidden, apiErrorResponse{Code: "invalid_csrf", Message: "invalid csrf token"})
 		return
 	}
 
 	if err := h.service.DeletePermanently(c.Request.Context(), c.Param("id")); err != nil {
-		h.writeMediaError(c, err)
+		h.writeMediaErrorJSON(c, err)
 		return
 	}
 
-	c.Redirect(http.StatusSeeOther, "/trash")
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-func (h Handler) EmptyTrash(c *gin.Context) {
-	if !h.auth.VerifySessionCSRF(c.Request, c.PostForm("csrf_token")) {
-		c.String(http.StatusForbidden, "invalid csrf token")
+func (h Handler) EmptyTrashJSON(c *gin.Context) {
+	if !h.auth.VerifySessionCSRF(c.Request, h.requestCSRFToken(c)) {
+		c.JSON(http.StatusForbidden, apiErrorResponse{Code: "invalid_csrf", Message: "invalid csrf token"})
 		return
 	}
 
 	if err := h.service.EmptyTrash(c.Request.Context()); err != nil {
-		h.writeMediaError(c, err)
+		h.writeMediaErrorJSON(c, err)
 		return
 	}
 
-	c.Redirect(http.StatusSeeOther, "/trash")
-}
-
-func (h Handler) renderLogin(c *gin.Context, status int, errMsg string) {
-	csrfToken, err := h.auth.IssueLoginCSRF(c)
-	if err != nil {
-		c.String(http.StatusInternalServerError, "issue csrf failed")
-		return
-	}
-
-	c.Status(status)
-	if err := h.templates.ExecuteTemplate(c.Writer, "login.html", gin.H{
-		"Error":     errMsg,
-		"CSRFToken": csrfToken,
-	}); err != nil {
-		c.String(http.StatusInternalServerError, "render login failed")
-	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (h Handler) DownloadMedia(c *gin.Context) {
@@ -453,12 +417,16 @@ func (h Handler) writeMediaErrorJSON(c *gin.Context, err error) {
 	}
 }
 
-func (h Handler) uploadCSRFToken(c *gin.Context) string {
+func (h Handler) requestCSRFToken(c *gin.Context) string {
 	token := c.GetHeader("X-CSRF-Token")
 	if token != "" {
 		return token
 	}
 	return c.PostForm("csrf_token")
+}
+
+func (h Handler) serveSPA(c *gin.Context) {
+	c.File(h.spaEntryPath)
 }
 
 func (h Handler) uploadDuplicateAction(c *gin.Context) media.DuplicateAction {
@@ -474,6 +442,20 @@ type apiErrorResponse struct {
 	Message string `json:"message"`
 }
 
+type loginRequest struct {
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	CSRFToken string `json:"csrfToken"`
+}
+
+type authStatusResponse struct {
+	Authenticated    bool     `json:"authenticated"`
+	Username         string   `json:"username,omitempty"`
+	CSRFToken        string   `json:"csrfToken"`
+	MaxUploadBytes   int64    `json:"maxUploadBytes"`
+	AllowedMimeTypes []string `json:"allowedMimeTypes"`
+}
+
 type mediaAssetResponse struct {
 	ID               string `json:"id"`
 	OriginalFilename string `json:"originalFilename"`
@@ -481,6 +463,7 @@ type mediaAssetResponse struct {
 	MIMEType         string `json:"mimeType"`
 	SizeBytes        int64  `json:"sizeBytes"`
 	CreatedAt        string `json:"createdAt"`
+	DeletedAt        string `json:"deletedAt,omitempty"`
 	DetailURL        string `json:"detailUrl"`
 	ViewURL          string `json:"viewUrl"`
 	ThumbnailURL     string `json:"thumbnailUrl"`
@@ -489,7 +472,7 @@ type mediaAssetResponse struct {
 
 func toMediaAssetResponse(asset media.Asset) mediaAssetResponse {
 	basePath := "/media/" + asset.ID
-	return mediaAssetResponse{
+	response := mediaAssetResponse{
 		ID:               asset.ID,
 		OriginalFilename: asset.OriginalFilename,
 		MediaType:        string(asset.MediaType),
@@ -501,4 +484,16 @@ func toMediaAssetResponse(asset media.Asset) mediaAssetResponse {
 		ThumbnailURL:     basePath + "/thumbnail",
 		DownloadURL:      basePath + "/download",
 	}
+
+	if asset.DeletedAt != nil {
+		response.DeletedAt = asset.DeletedAt.UTC().Format(time.RFC3339)
+	}
+
+	return response
+}
+
+func toTrashMediaAssetResponse(asset media.Asset) mediaAssetResponse {
+	response := toMediaAssetResponse(asset)
+	response.ThumbnailURL = "/trash/" + asset.ID + "/thumbnail"
+	return response
 }

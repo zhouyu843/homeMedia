@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"html/template"
 	"io"
 	"log"
 	"net/http"
@@ -49,8 +48,12 @@ func main() {
 		time.Duration(cfg.SessionTTLHours)*time.Hour,
 	)
 
-	templates := template.Must(template.ParseGlob("web/templates/*.html"))
-	handler := apphttp.NewHandler(serviceAdapter{service: service}, templates, cfg.MaxUploadSizeMB*1024*1024, authService)
+	handler := apphttp.NewHandler(
+		serviceAdapter{service: service},
+		cfg.MaxUploadSizeMB*1024*1024,
+		authService,
+		"./web/static/app/index.html",
+	)
 	router := apphttp.NewRouter(handler)
 
 	server := &http.Server{

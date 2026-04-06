@@ -10,13 +10,9 @@ export default defineConfig(({ mode }) => ({
     process: JSON.stringify({ env: { NODE_ENV: mode === "test" ? "test" : "production" } })
   },
   plugins: [react()],
+  base: "/static/app/",
   build: {
-    lib: {
-      entry: "src/upload-island.tsx",
-      formats: ["es"],
-      fileName: () => "upload-island.js"
-    },
-    outDir: "../static/react",
+    outDir: "../static/app",
     emptyOutDir: true,
     sourcemap: true
   },
