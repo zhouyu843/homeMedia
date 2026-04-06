@@ -1,18 +1,18 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: homemedia-postgres
-    command: ["postgres", "-p", "5441"]
+    restart: unless-stopped
+    command: ["postgres", "-p", "5442"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5441:5441"
+      - "5442:5442"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -p 5441 -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -p 5442 -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -32,7 +32,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: dev
+    restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL}
       MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB}
@@ -40,19 +40,13 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       SESSION_SECRET: ${SESSION_SECRET}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS}
-    command: ["sh", "-c", "go mod download && go run ./cmd/server"]
-    working_dir: /app
     volumes:
-      - ./:/app
       - ./data/uploads:/data/uploads
     ports:
-      - "8018:8080"
-      - "5175:5175"
+      - "8118:8080"
     depends_on:
       postgres:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
 
 volumes:
   postgres_data:

@@ -7,9 +7,10 @@ import (
 )
 
 const uploadRootDir = "/data/uploads"
+const listenPort = "8080"
 
 type Config struct {
-	AppPort         string
+	ListenPort      string
 	DatabaseURL     string
 	UploadRootDir   string
 	MaxUploadSizeMB int64
@@ -21,7 +22,7 @@ type Config struct {
 
 func Load() (Config, error) {
 	cfg := Config{
-		AppPort:         getEnv("APP_PORT", "8080"),
+		ListenPort:      listenPort,
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
 		UploadRootDir:   uploadRootDir,
 		MaxUploadSizeMB: getEnvAsInt64("MAX_UPLOAD_SIZE_MB", 200),

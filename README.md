@@ -137,7 +137,7 @@ make frontend-build
 5. 打开浏览器：
 
 ```text
-http://127.0.0.1:8080/login
+http://127.0.0.1:8018/login
 ```
 
 6. 使用 `.env` 中的管理员账号密码登录。
@@ -223,10 +223,13 @@ docker compose down
 
 说明：当前 `app` 容器内未验证 `gofmt` 可用，因此不要默认依赖 `make fmt` 风格的容器化格式化步骤，优先以测试和构建通过为准，必要时再补齐工具链。
 
+端口约定：
+- 本地开发对外固定使用 `8018` 访问应用。
+- 本地开发对外固定使用 `5441` 访问 PostgreSQL，容器内也监听 `5441`。
+
 ## 环境变量
 
 基础运行配置：
-- `APP_PORT`：服务端口，默认 `8080`
 - `DATABASE_URL`：PostgreSQL 连接串
 - `MAX_UPLOAD_SIZE_MB`：上传大小上限（MB）
 
@@ -258,4 +261,61 @@ docker compose down
 - 原始文件固定保存到宿主机 `./data/uploads/`，容器内路径为 `/data/uploads`。
 - 应用容器包含 `ffmpeg`，用于生成图片和视频缩略图。
 - 当前开发环境以 Docker Compose 为准。
+
+## 生产部署
+
+生产环境继续使用 Docker Compose，但使用单独的生产配置和部署脚本：
+
+- 生产镜像会在 Docker build 阶段完成前端 SPA 构建，并编译 Go 二进制。
+- 运行时容器不再挂载源码，也不再使用 `go run`。
+- 上传文件仍保存在宿主机 `./data/uploads/`，数据库数据保存在 Docker volume `postgres_data`。
+- 开发环境对外固定使用 `8018`，生产环境对外固定使用 `8118`。
+- 开发环境对外固定使用 `5441` 访问 PostgreSQL，生产环境对外固定使用 `5442`，并且容器内监听端口与对外端口保持一致。
+- 生产默认端口为 `8118`，对外访问地址示例：`http://127.0.0.1:8118/login`。
+
+部署步骤：
+
+1. 准备环境变量文件：
+
+```bash
+cp .env.production.example .env.production
+```
+
+2. 至少修改这些生产值：
+
+- `ADMIN_PASSWORD`
+- `SESSION_SECRET`
+- `POSTGRES_PASSWORD`
+- `DATABASE_URL`
+
+3. 执行部署脚本：
+
+```bash
+./scripts/deploy.sh
+```
+
+脚本会自动完成这些步骤：
+
+- 检查 `.env.production` 是否存在
+- 如果当前目录是干净的 git 工作区，则执行 `git pull --ff-only`
+- 如果 git 不可用、当前目录不是 git 工作区，或工作区有未提交改动，则跳过 `git pull` 并打印警告
+- 启动 PostgreSQL
+- 执行数据库迁移
+- 构建生产镜像并启动应用
+- 检查应用容器是否成功进入运行态
+- 输出当前服务状态
+
+如果启动失败，脚本会自动输出：
+
+- `docker compose ps`
+- `app` 最近 100 行日志
+- `postgres` 最近 50 行日志
+
+常用生产维护命令：
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f app
+docker compose --env-file .env.production -f docker-compose.prod.yml restart app
+docker compose --env-file .env.production -f docker-compose.prod.yml down
+```
 - 宿主机如果没有 Go 工具链，可以通过容器执行测试和前端命令。

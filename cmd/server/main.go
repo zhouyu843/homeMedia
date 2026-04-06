@@ -57,12 +57,12 @@ func main() {
 	router := apphttp.NewRouter(handler)
 
 	server := &http.Server{
-		Addr:              ":" + cfg.AppPort,
+		Addr:              ":" + cfg.ListenPort,
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("listening on :%s", cfg.AppPort)
+	log.Printf("listening on :%s", cfg.ListenPort)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
