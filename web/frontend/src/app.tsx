@@ -165,7 +165,7 @@ function LoginPage({
   );
 }
 
-function MediaListPage({
+export function MediaListPage({
   session,
   onSessionChange
 }: {
@@ -237,18 +237,23 @@ function MediaListPage({
         <section className="gallery-grid">
           {assets.map((asset) => (
             <article key={asset.id} className="media-card">
-              <button type="button" className="card-action" onClick={() => void handleDelete(asset)}>
-                回收
+              <button
+                type="button"
+                className="card-action"
+                onClick={() => void handleDelete(asset)}
+                aria-label="移入回收站"
+                title="移入回收站"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M9 3.75h6a1 1 0 0 1 1 1V6h3a.75.75 0 0 1 0 1.5h-1.02l-.82 10.21A2.25 2.25 0 0 1 14.92 20H9.08a2.25 2.25 0 0 1-2.24-2.29L6.02 7.5H5a.75.75 0 0 1 0-1.5h3V4.75a1 1 0 0 1 1-1Zm5.5 2.25v-.75h-5V6h5Zm-6.16 1.5.8 10.09a.75.75 0 0 0 .74.66h5.84a.75.75 0 0 0 .74-.66l.8-10.09H8.34Zm2.16 2.25c.41 0 .75.34.75.75v4.75a.75.75 0 0 1-1.5 0V10.5c0-.41.34-.75.75-.75Zm3 0c.41 0 .75.34.75.75v4.75a.75.75 0 0 1-1.5 0V10.5c0-.41.34-.75.75-.75Z" />
+                </svg>
+                <span className="sr-only">移入回收站</span>
               </button>
               <Link to={asset.detailUrl} className="card-link">
                 <figure className="card-thumb-wrap">
                   <img src={asset.thumbnailUrl} alt={asset.originalFilename} className="card-thumb" loading="lazy" />
                   {asset.mediaType === "video" && <span className="card-badge">VIDEO</span>}
                 </figure>
-                <div className="card-body">
-                  <h2>{asset.originalFilename}</h2>
-                  <p>{formatBytes(asset.sizeBytes)}</p>
-                </div>
               </Link>
             </article>
           ))}
