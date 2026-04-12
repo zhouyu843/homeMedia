@@ -6,7 +6,7 @@ function makeConfig(overrides?: Partial<UploadConfig>): UploadConfig {
   return {
     csrfToken: "token",
     maxUploadBytes: 1024,
-    allowedMimeTypes: new Set(["image/jpeg"]),
+    allowedMimeTypes: new Set(["image/jpeg", "application/pdf"]),
     uploadUrl: "/api/uploads",
     ...overrides
   };
@@ -30,6 +30,12 @@ describe("validateFile", () => {
     const file = { type: "image/jpeg", size: 512 } as File;
     expect(validateFile(config, file)).toBeNull();
   });
+
+  it("accepts pdf file when mime type is allowed", () => {
+    const config = makeConfig();
+    const file = { type: "application/pdf", size: 512 } as File;
+    expect(validateFile(config, file)).toBeNull();
+  });
 });
 
 describe("formatBytes", () => {
@@ -45,12 +51,13 @@ describe("buildUploadConfig", () => {
       authenticated: true,
       csrfToken: "csrf-token",
       maxUploadBytes: 2048,
-      allowedMimeTypes: ["image/jpeg", "video/mp4"]
+      allowedMimeTypes: ["image/jpeg", "video/mp4", "application/pdf"]
     };
 
     const config = buildUploadConfig(status);
     expect(config.csrfToken).toBe("csrf-token");
     expect(config.maxUploadBytes).toBe(2048);
     expect(config.allowedMimeTypes.has("video/mp4")).toBe(true);
+    expect(config.allowedMimeTypes.has("application/pdf")).toBe(true);
   });
 });

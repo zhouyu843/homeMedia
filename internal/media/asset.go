@@ -10,6 +10,7 @@ type MediaType string
 const (
 	MediaTypeImage MediaType = "image"
 	MediaTypeVideo MediaType = "video"
+	MediaTypePDF   MediaType = "pdf"
 )
 
 type Asset struct {

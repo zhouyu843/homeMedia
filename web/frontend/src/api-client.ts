@@ -1,7 +1,9 @@
+export type ApiMediaType = "image" | "video" | "pdf";
+
 export type ApiAsset = {
   id: string;
   originalFilename: string;
-  mediaType: "image" | "video";
+  mediaType: ApiMediaType;
   mimeType: string;
   sizeBytes: number;
   createdAt: string;

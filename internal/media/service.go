@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -240,7 +241,15 @@ func (s Service) openAssetFile(asset Asset) (Asset, io.ReadSeekCloser, error) {
 }
 
 func (s Service) generateThumbnail(ctx context.Context, file io.Reader, mediaType MediaType) (string, []byte, error) {
-	thumb, err := generateThumbnailWithFFmpeg(ctx, file, mediaType)
+	var (
+		thumb []byte
+		err   error
+	)
+	if mediaType == MediaTypePDF {
+		thumb, err = generateThumbnailWithPdftoppm(ctx, file)
+	} else {
+		thumb, err = generateThumbnailWithFFmpeg(ctx, file, mediaType)
+	}
 	if err != nil {
 		return "", nil, err
 	}
@@ -260,6 +269,9 @@ func mediaTypeFromMIME(mimeType string) (MediaType, error) {
 	if _, ok := allowedVideoMIMETypes[normalized]; ok {
 		return MediaTypeVideo, nil
 	}
+	if _, ok := allowedPDFMIMETypes[normalized]; ok {
+		return MediaTypePDF, nil
+	}
 
 	return "", ErrUnsupportedMediaType
 }
@@ -278,12 +290,19 @@ var allowedVideoMIMETypes = map[string]struct{}{
 	"video/x-matroska": {},
 }
 
+var allowedPDFMIMETypes = map[string]struct{}{
+	"application/pdf": {},
+}
+
 func AllowedUploadMIMETypes() []string {
-	mimeTypes := make([]string, 0, len(allowedImageMIMETypes)+len(allowedVideoMIMETypes))
+	mimeTypes := make([]string, 0, len(allowedImageMIMETypes)+len(allowedVideoMIMETypes)+len(allowedPDFMIMETypes))
 	for mimeType := range allowedImageMIMETypes {
 		mimeTypes = append(mimeTypes, mimeType)
 	}
 	for mimeType := range allowedVideoMIMETypes {
+		mimeTypes = append(mimeTypes, mimeType)
+	}
+	for mimeType := range allowedPDFMIMETypes {
 		mimeTypes = append(mimeTypes, mimeType)
 	}
 	sort.Strings(mimeTypes)
@@ -330,6 +349,69 @@ func generateThumbnailWithFFmpeg(ctx context.Context, source io.Reader, mediaTyp
 	}
 
 	return out.Bytes(), nil
+}
+
+func generateThumbnailWithPdftoppm(ctx context.Context, source io.Reader) ([]byte, error) {
+	tctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+
+	inputFile, err := os.CreateTemp("", "home-media-pdf-thumb-*.pdf")
+	if err != nil {
+		return nil, fmt.Errorf("%w: create pdf temp file: %v", ErrThumbnailGeneration, err)
+	}
+	inputPath := inputFile.Name()
+	defer func() {
+		_ = inputFile.Close()
+		_ = os.Remove(inputPath)
+	}()
+
+	if _, err := io.Copy(inputFile, source); err != nil {
+		return nil, fmt.Errorf("%w: buffer pdf source: %v", ErrThumbnailGeneration, err)
+	}
+	if err := inputFile.Close(); err != nil {
+		return nil, fmt.Errorf("%w: close pdf temp file: %v", ErrThumbnailGeneration, err)
+	}
+
+	outputDir, err := os.MkdirTemp("", "home-media-pdf-thumb-out-*")
+	if err != nil {
+		return nil, fmt.Errorf("%w: create pdf output dir: %v", ErrThumbnailGeneration, err)
+	}
+	defer func() {
+		_ = os.RemoveAll(outputDir)
+	}()
+
+	outputPrefix := filepath.Join(outputDir, "page")
+	cmd := exec.CommandContext(
+		tctx,
+		"pdftoppm",
+		"-jpeg",
+		"-f", "1",
+		"-l", "1",
+		"-singlefile",
+		inputPath,
+		outputPrefix,
+	)
+
+	var errOut bytes.Buffer
+	cmd.Stderr = &errOut
+
+	if err := cmd.Run(); err != nil {
+		if strings.TrimSpace(errOut.String()) != "" {
+			return nil, fmt.Errorf("%w: %s", ErrThumbnailGeneration, strings.TrimSpace(errOut.String()))
+		}
+		return nil, fmt.Errorf("%w: %v", ErrThumbnailGeneration, err)
+	}
+
+	thumbnailPath := outputPrefix + ".jpg"
+	thumbnail, err := os.ReadFile(thumbnailPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read pdf thumbnail: %v", ErrThumbnailGeneration, err)
+	}
+	if len(thumbnail) == 0 {
+		return nil, ErrThumbnailGeneration
+	}
+
+	return thumbnail, nil
 }
 
 func createUploadTempFile(source io.Reader) (*os.File, string, int64, error) {

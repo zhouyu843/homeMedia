@@ -52,6 +52,63 @@ func TestServiceUploadStoresMetadata(t *testing.T) {
 	}
 }
 
+func TestServiceUploadStoresPDFMetadata(t *testing.T) {
+	repo := &fakeRepository{}
+	store := &fakeFileStore{
+		storedFile: StoredFile{
+			StoredFilename: "stored.pdf",
+			StoragePath:    "20260412/stored.pdf",
+			SizeBytes:      8,
+		},
+	}
+	service := NewService(repo, store)
+	service.now = func() time.Time {
+		return time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC)
+	}
+
+	result, err := service.Upload(context.Background(), UploadInput{
+		OriginalFilename: "book.pdf",
+		MIMEType:         "application/pdf",
+		SizeBytes:        8,
+		Reader:           strings.NewReader("pdf-data"),
+	})
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if !result.Created || result.Existing {
+		t.Fatalf("expected created upload result, got %+v", result)
+	}
+	asset := result.Asset
+
+	if asset.OriginalFilename != "book.pdf" {
+		t.Fatalf("expected original filename to be preserved, got %q", asset.OriginalFilename)
+	}
+	if asset.MediaType != MediaTypePDF {
+		t.Fatalf("expected pdf media type, got %q", asset.MediaType)
+	}
+	if asset.MIMEType != "application/pdf" {
+		t.Fatalf("expected MIME type to be preserved, got %q", asset.MIMEType)
+	}
+	if repo.savedAsset.StoragePath != "20260412/stored.pdf" {
+		t.Fatalf("expected storage path to be saved, got %q", repo.savedAsset.StoragePath)
+	}
+	if store.deletedPath != "" {
+		t.Fatalf("did not expect stored file cleanup, got %q", store.deletedPath)
+	}
+	if repo.savedAsset.MediaType != MediaTypePDF {
+		t.Fatalf("expected repository to persist pdf media type, got %q", repo.savedAsset.MediaType)
+	}
+	if repo.savedAsset.CreatedAt != time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC) {
+		t.Fatalf("expected created at to use service clock, got %v", repo.savedAsset.CreatedAt)
+	}
+	if repo.savedAsset.ContentHash == "" {
+		t.Fatal("expected content hash to be populated")
+	}
+	if repo.savedAsset.SizeBytes != 8 {
+		t.Fatalf("expected size bytes to be stored, got %d", repo.savedAsset.SizeBytes)
+	}
+}
+
 func TestServiceUploadRejectsUnsupportedType(t *testing.T) {
 	service := NewService(&fakeRepository{}, &fakeFileStore{})
 

@@ -2,7 +2,7 @@ FROM golang:1.24-alpine AS dev
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates git ffmpeg nodejs npm
+RUN apk add --no-cache ca-certificates git ffmpeg nodejs npm poppler-utils
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -34,7 +34,7 @@ FROM alpine:3.21
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates ffmpeg \
+RUN apk add --no-cache ca-certificates ffmpeg poppler-utils \
 	&& mkdir -p /app/web/static/app /data/uploads
 
 COPY --from=backend-builder /out/homemedia /app/homemedia

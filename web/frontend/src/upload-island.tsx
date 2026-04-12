@@ -21,7 +21,7 @@ type UploadItem = {
   progress: number;
   error?: string;
   errorCode?: string;
-  previewKind: "image" | "video" | "none";
+  previewKind: "image" | "video" | "pdf" | "none";
   previewUrl?: string;
   retryable: boolean;
 };
@@ -353,6 +353,7 @@ export function UploadIslandApp({
           ref={fileInputRef}
           type="file"
           multiple
+          accept={Array.from(config.allowedMimeTypes).join(",")}
           onChange={(event) => addFiles(event.target.files)}
           aria-label="选择要上传的文件"
         />
@@ -455,6 +456,10 @@ function renderPreview(item: UploadItem) {
     return <span className="upload-preview-pill">VIDEO</span>;
   }
 
+  if (item.previewKind === "pdf") {
+    return <span className="upload-preview-pill">PDF</span>;
+  }
+
   return <span className="upload-preview-fallback">FILE</span>;
 }
 
@@ -464,6 +469,9 @@ function createPreviewForFile(file: File): { kind: UploadItem["previewKind"]; pr
   }
   if (file.type.startsWith("video/")) {
     return { kind: "video" };
+  }
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    return { kind: "pdf" };
   }
   return { kind: "none" };
 }

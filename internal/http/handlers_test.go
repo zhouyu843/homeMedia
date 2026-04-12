@@ -193,6 +193,108 @@ func TestUploadListDetailAndDownloadFlowOverAPI(t *testing.T) {
   }
 }
 
+func TestUploadPDFListDetailDownloadAndTrashFlowOverAPI(t *testing.T) {
+  gin.SetMode(gin.TestMode)
+
+  repo := &memoryRepository{}
+  store := mustLocalStore(t)
+  router := testRouter(t, repo, store)
+  sessionCookie, authStatus := loginSession(t, router)
+
+  pdfBody := []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF")
+  uploadReq := newUploadRequest(t, "manual.pdf", pdfBody, map[string]string{"csrf_token": authStatus.CSRFToken})
+  uploadReq.AddCookie(sessionCookie)
+  uploadReq.Header.Set("X-CSRF-Token", authStatus.CSRFToken)
+  uploadResp := httptest.NewRecorder()
+  router.ServeHTTP(uploadResp, uploadReq)
+  if uploadResp.Code != http.StatusCreated {
+    t.Fatalf("expected upload status 201, got %d with body %q", uploadResp.Code, uploadResp.Body.String())
+  }
+
+  var uploadPayload struct {
+    Asset    mediaAssetResponse `json:"asset"`
+    Existing bool               `json:"existing"`
+  }
+  if err := json.Unmarshal(uploadResp.Body.Bytes(), &uploadPayload); err != nil {
+    t.Fatalf("json.Unmarshal returned error: %v", err)
+  }
+  if uploadPayload.Existing {
+    t.Fatal("expected first upload not existing")
+  }
+  if uploadPayload.Asset.MediaType != string(media.MediaTypePDF) {
+    t.Fatalf("expected mediaType pdf, got %q", uploadPayload.Asset.MediaType)
+  }
+
+  listResp := httptest.NewRecorder()
+  listReq := httptest.NewRequest(http.MethodGet, "/api/media", nil)
+  listReq.AddCookie(sessionCookie)
+  router.ServeHTTP(listResp, listReq)
+  if listResp.Code != http.StatusOK {
+    t.Fatalf("expected list status 200, got %d", listResp.Code)
+  }
+  if !strings.Contains(listResp.Body.String(), "manual.pdf") {
+    t.Fatalf("expected list payload to contain uploaded filename, got %q", listResp.Body.String())
+  }
+  if !strings.Contains(listResp.Body.String(), `"mediaType":"pdf"`) {
+    t.Fatalf("expected list payload to contain pdf media type, got %q", listResp.Body.String())
+  }
+
+  detailResp := httptest.NewRecorder()
+  detailReq := httptest.NewRequest(http.MethodGet, "/api/media/"+uploadPayload.Asset.ID, nil)
+  detailReq.AddCookie(sessionCookie)
+  router.ServeHTTP(detailResp, detailReq)
+  if detailResp.Code != http.StatusOK {
+    t.Fatalf("expected detail status 200, got %d", detailResp.Code)
+  }
+  if !strings.Contains(detailResp.Body.String(), "manual.pdf") {
+    t.Fatalf("expected detail payload to contain pdf filename, got %q", detailResp.Body.String())
+  }
+
+  viewResp := httptest.NewRecorder()
+  viewReq := httptest.NewRequest(http.MethodGet, "/media/"+uploadPayload.Asset.ID+"/view", nil)
+  viewReq.AddCookie(sessionCookie)
+  router.ServeHTTP(viewResp, viewReq)
+  if viewResp.Code != http.StatusOK {
+    t.Fatalf("expected view status 200, got %d", viewResp.Code)
+  }
+  if got := viewResp.Header().Get("Content-Type"); got != "application/pdf" {
+    t.Fatalf("expected view content type application/pdf, got %q", got)
+  }
+  if !bytes.Contains(viewResp.Body.Bytes(), []byte("%PDF-1.4")) {
+    t.Fatalf("expected view body to contain PDF bytes")
+  }
+
+  downloadResp := httptest.NewRecorder()
+  downloadReq := httptest.NewRequest(http.MethodGet, "/media/"+uploadPayload.Asset.ID+"/download", nil)
+  downloadReq.AddCookie(sessionCookie)
+  router.ServeHTTP(downloadResp, downloadReq)
+  if downloadResp.Code != http.StatusOK {
+    t.Fatalf("expected download status 200, got %d", downloadResp.Code)
+  }
+  if got := downloadResp.Header().Get("Content-Type"); got != "application/pdf" {
+    t.Fatalf("expected download content type application/pdf, got %q", got)
+  }
+  if !bytes.Contains(downloadResp.Body.Bytes(), []byte("%PDF-1.4")) {
+    t.Fatalf("expected download body to contain PDF bytes")
+  }
+
+  deleteResp := performCSRFPost(t, router, "/api/media/"+uploadPayload.Asset.ID+"/delete", sessionCookie, authStatus.CSRFToken)
+  if deleteResp.Code != http.StatusOK {
+    t.Fatalf("expected delete status 200, got %d with body %q", deleteResp.Code, deleteResp.Body.String())
+  }
+
+  trashResp := httptest.NewRecorder()
+  trashReq := httptest.NewRequest(http.MethodGet, "/api/trash", nil)
+  trashReq.AddCookie(sessionCookie)
+  router.ServeHTTP(trashResp, trashReq)
+  if trashResp.Code != http.StatusOK {
+    t.Fatalf("expected trash list status 200, got %d", trashResp.Code)
+  }
+  if !strings.Contains(trashResp.Body.String(), "manual.pdf") {
+    t.Fatalf("expected pdf to appear in trash list, got %q", trashResp.Body.String())
+  }
+}
+
 func TestDeleteRestoreAndPermanentDeleteFlowOverAPI(t *testing.T) {
   gin.SetMode(gin.TestMode)
 

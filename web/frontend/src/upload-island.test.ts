@@ -22,7 +22,7 @@ function makeConfig(overrides?: Partial<UploadConfig>): UploadConfig {
   return {
     csrfToken: "token",
     maxUploadBytes: 10 * 1024 * 1024,
-    allowedMimeTypes: new Set(["image/jpeg", "video/mp4"]),
+    allowedMimeTypes: new Set(["image/jpeg", "video/mp4", "application/pdf"]),
     uploadUrl: "/api/uploads",
     ...overrides
   };
@@ -200,5 +200,16 @@ describe("UploadIslandApp", () => {
 
     expect(screen.queryByText("松开即可上传到当前页面")).toBeNull();
     expect(document.body.classList.contains("upload-page-drag-active")).toBe(false);
+  });
+
+  it("labels pdf files without creating local object urls", async () => {
+    render(React.createElement(UploadIslandApp, { config: makeConfig() }));
+
+    const input = screen.getByLabelText("选择要上传的文件") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeFile("manual.pdf", "application/pdf", "%PDF-1.4")] } });
+
+    await screen.findByText("manual.pdf");
+    expect(screen.getByText("PDF")).toBeTruthy();
+    expect(createObjectURL).not.toHaveBeenCalled();
   });
 });

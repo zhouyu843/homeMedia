@@ -16,6 +16,7 @@ import {
   permanentlyDeleteMedia,
   restoreMedia,
   type ApiAsset,
+  type ApiMediaType,
   type AuthStatusResponse,
   type UploadResponse
 } from "./api-client";
@@ -277,8 +278,13 @@ export function MediaListPage({
                     loading="lazy"
                     onLoad={(event) => handleThumbnailLoad(asset.id, event)}
                   />
-                  {asset.mediaType === "video" && <span className="card-badge">VIDEO</span>}
+                  {getMediaBadgeLabel(asset.mediaType) && <span className="card-badge">{getMediaBadgeLabel(asset.mediaType)}</span>}
                 </figure>
+                {asset.mediaType === "pdf" && (
+                  <div className="card-caption" title={asset.originalFilename}>
+                    {asset.originalFilename}
+                  </div>
+                )}
               </Link>
             </article>
           ))}
@@ -288,7 +294,7 @@ export function MediaListPage({
   );
 }
 
-function MediaDetailPage({
+export function MediaDetailPage({
   session,
   onSessionChange
 }: {
@@ -353,12 +359,14 @@ function MediaDetailPage({
           <div className="detail-preview">
             {asset.mediaType === "image" ? (
               <img src={asset.viewUrl} alt={asset.originalFilename} className="detail-image" />
-            ) : (
+            ) : asset.mediaType === "video" ? (
               <video src={asset.viewUrl} controls className="detail-video" />
+            ) : (
+              <iframe src={asset.viewUrl} title={asset.originalFilename} className="detail-pdf" data-testid="detail-pdf-frame" />
             )}
           </div>
           <div className="detail-meta">
-            <p className="eyebrow">{asset.mediaType === "image" ? "Image" : "Video"}</p>
+            <p className="eyebrow">{getMediaTypeLabel(asset.mediaType)}</p>
             <h2>{asset.originalFilename}</h2>
             <p>{formatBytes(asset.sizeBytes)}</p>
             <p>{new Date(asset.createdAt).toLocaleString()}</p>
@@ -375,6 +383,26 @@ function MediaDetailPage({
       )}
     </PageLayout>
   );
+}
+
+function getMediaBadgeLabel(mediaType: ApiMediaType): string | null {
+  if (mediaType === "video") {
+    return "VIDEO";
+  }
+  if (mediaType === "pdf") {
+    return "PDF";
+  }
+  return null;
+}
+
+function getMediaTypeLabel(mediaType: ApiMediaType): string {
+  if (mediaType === "image") {
+    return "Image";
+  }
+  if (mediaType === "video") {
+    return "Video";
+  }
+  return "PDF";
 }
 
 function TrashPage({
