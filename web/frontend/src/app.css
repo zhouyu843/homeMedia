@@ -435,6 +435,10 @@ p {
   background: transparent;
 }
 
+.card-video-preview {
+  pointer-events: none;
+}
+
 .card-badge {
   position: absolute;
   z-index: 2;

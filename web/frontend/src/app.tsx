@@ -201,24 +201,61 @@ export function MediaListPage({
     };
   }, []);
 
-  const handleThumbnailLoad = React.useCallback((assetId: string, event: React.SyntheticEvent<HTMLImageElement>) => {
-    const { naturalWidth, naturalHeight } = event.currentTarget;
-    if (!naturalWidth || !naturalHeight) {
-      return;
-    }
-
-    const nextRatio = Number((naturalWidth / naturalHeight).toFixed(4));
-    setThumbnailRatios((current) => {
-      if (current[assetId] === nextRatio) {
-        return current;
+  const handleCardMediaLoad = React.useCallback(
+    (assetId: string, event: React.SyntheticEvent<HTMLImageElement | HTMLVideoElement>) => {
+      const element = event.currentTarget;
+      const width = element instanceof HTMLVideoElement ? element.videoWidth : element.naturalWidth;
+      const height = element instanceof HTMLVideoElement ? element.videoHeight : element.naturalHeight;
+      if (!width || !height) {
+        return;
       }
 
-      return {
-        ...current,
-        [assetId]: nextRatio
-      };
-    });
-  }, []);
+      const nextRatio = Number((width / height).toFixed(4));
+      setThumbnailRatios((current) => {
+        if (current[assetId] === nextRatio) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [assetId]: nextRatio
+        };
+      });
+    },
+    []
+  );
+
+  const renderCardPreview = React.useCallback(
+    (asset: ApiAsset) => {
+      if (asset.mediaType === "video") {
+        return (
+          <video
+            src={asset.viewUrl}
+            aria-label={asset.originalFilename}
+            className="card-thumb card-video-preview"
+            poster={asset.thumbnailUrl}
+            preload="metadata"
+            autoPlay
+            muted
+            loop
+            playsInline
+            onLoadedMetadata={(event) => handleCardMediaLoad(asset.id, event)}
+          />
+        );
+      }
+
+      return (
+        <img
+          src={asset.thumbnailUrl}
+          alt={asset.originalFilename}
+          className="card-thumb"
+          loading="lazy"
+          onLoad={(event) => handleCardMediaLoad(asset.id, event)}
+        />
+      );
+    },
+    [handleCardMediaLoad]
+  );
 
   const handleUploadResolved = (response: UploadResponse) => {
     setAssets((current) => {
@@ -272,13 +309,7 @@ export function MediaListPage({
               {asset.mediaType === "pdf" ? (
                 <a href={asset.viewUrl} className="card-link" target="_blank" rel="noreferrer noopener">
                   <figure className="card-thumb-wrap" style={{ aspectRatio: `${thumbnailRatios[asset.id] ?? 1}` }}>
-                    <img
-                      src={asset.thumbnailUrl}
-                      alt={asset.originalFilename}
-                      className="card-thumb"
-                      loading="lazy"
-                      onLoad={(event) => handleThumbnailLoad(asset.id, event)}
-                    />
+                    {renderCardPreview(asset)}
                     {getMediaBadgeLabel(asset.mediaType) && <span className="card-badge">{getMediaBadgeLabel(asset.mediaType)}</span>}
                   </figure>
                   {asset.mediaType === "pdf" && (
@@ -290,13 +321,7 @@ export function MediaListPage({
               ) : (
                 <Link to={`/media/${asset.id}`} className="card-link">
                   <figure className="card-thumb-wrap" style={{ aspectRatio: `${thumbnailRatios[asset.id] ?? 1}` }}>
-                    <img
-                      src={asset.thumbnailUrl}
-                      alt={asset.originalFilename}
-                      className="card-thumb"
-                      loading="lazy"
-                      onLoad={(event) => handleThumbnailLoad(asset.id, event)}
-                    />
+                    {renderCardPreview(asset)}
                     {getMediaBadgeLabel(asset.mediaType) && <span className="card-badge">{getMediaBadgeLabel(asset.mediaType)}</span>}
                   </figure>
                 </Link>
