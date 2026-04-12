@@ -140,7 +140,6 @@ function LoginPage({
       <section className="auth-card">
         <p className="eyebrow">HomeMedia</p>
         <h1>媒体库登录</h1>
-        <p className="auth-copy">前端已切换为 React + TypeScript，认证与会话仍由 Go 负责。</p>
         <form className="auth-form" onSubmit={handleSubmit}>
           <label>
             用户名
@@ -343,7 +342,7 @@ function MediaDetailPage({
   };
 
   return (
-    <PageLayout session={session} onSessionChange={onSessionChange} title="媒体详情" subtitle="保留原始文件流接口，页面由 React 渲染。">
+    <PageLayout session={session} onSessionChange={onSessionChange} title="媒体详情">
       {error && <p className="page-error">{error}</p>}
       {loading ? (
         <div className="empty-state">正在加载详情…</div>
@@ -495,13 +494,11 @@ function PageLayout({
   session,
   onSessionChange,
   title,
-  subtitle,
   children
 }: {
   session: SessionState;
   onSessionChange: React.Dispatch<React.SetStateAction<SessionState>>;
   title: string;
-  subtitle?: string;
   children: React.ReactNode;
 }) {
   const navigate = useNavigate();
@@ -532,7 +529,6 @@ function PageLayout({
         <div>
           <p className="eyebrow">HomeMedia</p>
           <h1>{title}</h1>
-          {subtitle && <p className="page-subtitle">{subtitle}</p>}
         </div>
         <div className="header-actions">
           {location.pathname !== "/media" && (
