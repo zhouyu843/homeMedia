@@ -25,7 +25,7 @@ func Load() (Config, error) {
 		ListenPort:      listenPort,
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
 		UploadRootDir:   uploadRootDir,
-		MaxUploadSizeMB: getEnvAsInt64("MAX_UPLOAD_SIZE_MB", 200),
+		MaxUploadSizeMB: getEnvAsInt64("MAX_UPLOAD_SIZE_MB", 2048),
 		AdminUsername:   getEnv("ADMIN_USERNAME", "admin"),
 		AdminPassword:   os.Getenv("ADMIN_PASSWORD"),
 		SessionSecret:   os.Getenv("SESSION_SECRET"),

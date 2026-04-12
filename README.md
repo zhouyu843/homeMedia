@@ -241,7 +241,7 @@ docker compose down
 
 基础运行配置：
 - `DATABASE_URL`：PostgreSQL 连接串
-- `MAX_UPLOAD_SIZE_MB`：上传大小上限（MB）
+- `MAX_UPLOAD_SIZE_MB`：上传大小上限（MB），默认 `2048`（2GB）
 
 认证与会话配置：
 - `ADMIN_USERNAME`：管理员用户名，默认 `admin`
