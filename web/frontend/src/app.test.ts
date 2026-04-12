@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -99,5 +99,16 @@ describe("MediaListPage", () => {
     expect(screen.queryByText("512 B")).toBeNull();
     expect(screen.queryByText("2.0 KB")).toBeNull();
     expect(screen.getAllByRole("button", { name: "移入回收站" })).toHaveLength(2);
+
+    const imageFigure = imageThumb.closest("figure");
+    expect(imageFigure?.getAttribute("style")).toContain("aspect-ratio: 1");
+
+    Object.defineProperty(imageThumb, "naturalWidth", { configurable: true, value: 1600 });
+    Object.defineProperty(imageThumb, "naturalHeight", { configurable: true, value: 900 });
+    fireEvent.load(imageThumb);
+
+    await waitFor(() => {
+      expect(imageFigure?.getAttribute("style")).toContain("aspect-ratio: 1.7778");
+    });
   });
 });

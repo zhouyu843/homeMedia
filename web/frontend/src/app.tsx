@@ -173,6 +173,7 @@ export function MediaListPage({
   onSessionChange: React.Dispatch<React.SetStateAction<SessionState>>;
 }) {
   const [assets, setAssets] = React.useState<ApiAsset[]>([]);
+  const [thumbnailRatios, setThumbnailRatios] = React.useState<Record<string, number>>({});
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
 
@@ -198,6 +199,25 @@ export function MediaListPage({
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  const handleThumbnailLoad = React.useCallback((assetId: string, event: React.SyntheticEvent<HTMLImageElement>) => {
+    const { naturalWidth, naturalHeight } = event.currentTarget;
+    if (!naturalWidth || !naturalHeight) {
+      return;
+    }
+
+    const nextRatio = Number((naturalWidth / naturalHeight).toFixed(4));
+    setThumbnailRatios((current) => {
+      if (current[assetId] === nextRatio) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [assetId]: nextRatio
+      };
+    });
   }, []);
 
   const handleUploadResolved = (response: UploadResponse) => {
@@ -250,8 +270,14 @@ export function MediaListPage({
                 <span className="sr-only">移入回收站</span>
               </button>
               <Link to={asset.detailUrl} className="card-link">
-                <figure className="card-thumb-wrap">
-                  <img src={asset.thumbnailUrl} alt={asset.originalFilename} className="card-thumb" loading="lazy" />
+                <figure className="card-thumb-wrap" style={{ aspectRatio: `${thumbnailRatios[asset.id] ?? 1}` }}>
+                  <img
+                    src={asset.thumbnailUrl}
+                    alt={asset.originalFilename}
+                    className="card-thumb"
+                    loading="lazy"
+                    onLoad={(event) => handleThumbnailLoad(asset.id, event)}
+                  />
                   {asset.mediaType === "video" && <span className="card-badge">VIDEO</span>}
                 </figure>
               </Link>
