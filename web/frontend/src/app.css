@@ -472,17 +472,11 @@ p {
 }
 
 .detail-image,
-.detail-video,
-.detail-pdf {
+.detail-video {
   width: 100%;
   min-height: 320px;
   object-fit: contain;
   background: rgba(32, 22, 18, 0.08);
-}
-
-.detail-pdf {
-  height: min(78vh, 960px);
-  border: 0;
 }
 
 .detail-meta {

@@ -33,7 +33,6 @@ function makeAsset(overrides?: Partial<ApiAsset>): ApiAsset {
     mimeType: "image/jpeg",
     sizeBytes: 512,
     createdAt: "2026-04-06T10:00:00Z",
-    detailUrl: "/media/asset-1",
     viewUrl: "/media/asset-1/view",
     thumbnailUrl: "/media/asset-1/thumbnail",
     downloadUrl: "/media/asset-1/download",
@@ -67,7 +66,6 @@ describe("MediaListPage", () => {
         mediaType: "video",
         mimeType: "video/mp4",
         sizeBytes: 2048,
-        detailUrl: "/media/asset-2",
         viewUrl: "/media/asset-2/view",
         thumbnailUrl: "/media/asset-2/thumbnail",
         downloadUrl: "/media/asset-2/download"
@@ -122,7 +120,6 @@ describe("MediaListPage", () => {
         originalFilename: "manual.pdf",
         mediaType: "pdf",
         mimeType: "application/pdf",
-        detailUrl: "/media/asset-pdf",
         viewUrl: "/media/asset-pdf/view",
         thumbnailUrl: "/media/asset-pdf/thumbnail",
         downloadUrl: "/media/asset-pdf/download"
@@ -147,6 +144,9 @@ describe("MediaListPage", () => {
     expect(screen.getByAltText("manual.pdf")).toBeTruthy();
     expect(screen.getByText("PDF")).toBeTruthy();
     expect(screen.getByText("manual.pdf")).toBeTruthy();
+    const pdfLink = screen.getByRole("link", { name: "manual.pdf PDF manual.pdf" });
+    expect(pdfLink.getAttribute("href")).toBe("/media/asset-pdf/view");
+    expect(pdfLink.getAttribute("target")).toBe("_blank");
   });
 });
 
@@ -155,14 +155,13 @@ describe("MediaDetailPage", () => {
     getMediaMock.mockReset();
   });
 
-  it("renders pdf assets inside an embedded document frame", async () => {
+  it("shows unsupported state for pdf assets", async () => {
     getMediaMock.mockResolvedValue(
       makeAsset({
         id: "asset-pdf",
         originalFilename: "manual.pdf",
         mediaType: "pdf",
         mimeType: "application/pdf",
-        detailUrl: "/media/asset-pdf",
         viewUrl: "/media/asset-pdf/view",
         thumbnailUrl: "/media/asset-pdf/thumbnail",
         downloadUrl: "/media/asset-pdf/download"
@@ -187,10 +186,7 @@ describe("MediaDetailPage", () => {
       )
     );
 
-    const frame = await screen.findByTestId("detail-pdf-frame");
-    expect(frame.tagName).toBe("IFRAME");
-    expect(frame.getAttribute("src")).toBe("/media/asset-pdf/view");
-    expect(screen.getAllByText("PDF").length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "下载原始文件" }).getAttribute("href")).toBe("/media/asset-pdf/download");
+    expect(await screen.findByText("PDF 不提供详情页，请返回列表后直接打开原文件。")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "下载原始文件" })).toBeNull();
   });
 });

@@ -193,6 +193,17 @@ func (h Handler) GetMediaJSON(c *gin.Context) {
 }
 
 func (h Handler) ShowMedia(c *gin.Context) {
+	asset, err := h.service.Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.writeMediaError(c, err)
+		return
+	}
+
+	if asset.MediaType == media.MediaTypePDF {
+		c.String(http.StatusNotFound, "detail page not available for pdf")
+		return
+	}
+
 	h.serveSPA(c)
 }
 
@@ -464,7 +475,6 @@ type mediaAssetResponse struct {
 	SizeBytes        int64  `json:"sizeBytes"`
 	CreatedAt        string `json:"createdAt"`
 	DeletedAt        string `json:"deletedAt,omitempty"`
-	DetailURL        string `json:"detailUrl"`
 	ViewURL          string `json:"viewUrl"`
 	ThumbnailURL     string `json:"thumbnailUrl"`
 	DownloadURL      string `json:"downloadUrl"`
@@ -479,7 +489,6 @@ func toMediaAssetResponse(asset media.Asset) mediaAssetResponse {
 		MIMEType:         asset.MIMEType,
 		SizeBytes:        asset.SizeBytes,
 		CreatedAt:        asset.CreatedAt.UTC().Format(time.RFC3339),
-		DetailURL:        basePath,
 		ViewURL:          basePath + "/view",
 		ThumbnailURL:     basePath + "/thumbnail",
 		DownloadURL:      basePath + "/download",

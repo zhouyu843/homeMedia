@@ -269,23 +269,38 @@ export function MediaListPage({
                 </svg>
                 <span className="sr-only">移入回收站</span>
               </button>
-              <Link to={asset.detailUrl} className="card-link">
-                <figure className="card-thumb-wrap" style={{ aspectRatio: `${thumbnailRatios[asset.id] ?? 1}` }}>
-                  <img
-                    src={asset.thumbnailUrl}
-                    alt={asset.originalFilename}
-                    className="card-thumb"
-                    loading="lazy"
-                    onLoad={(event) => handleThumbnailLoad(asset.id, event)}
-                  />
-                  {getMediaBadgeLabel(asset.mediaType) && <span className="card-badge">{getMediaBadgeLabel(asset.mediaType)}</span>}
-                </figure>
-                {asset.mediaType === "pdf" && (
-                  <div className="card-caption" title={asset.originalFilename}>
-                    {asset.originalFilename}
-                  </div>
-                )}
-              </Link>
+              {asset.mediaType === "pdf" ? (
+                <a href={asset.viewUrl} className="card-link" target="_blank" rel="noreferrer noopener">
+                  <figure className="card-thumb-wrap" style={{ aspectRatio: `${thumbnailRatios[asset.id] ?? 1}` }}>
+                    <img
+                      src={asset.thumbnailUrl}
+                      alt={asset.originalFilename}
+                      className="card-thumb"
+                      loading="lazy"
+                      onLoad={(event) => handleThumbnailLoad(asset.id, event)}
+                    />
+                    {getMediaBadgeLabel(asset.mediaType) && <span className="card-badge">{getMediaBadgeLabel(asset.mediaType)}</span>}
+                  </figure>
+                  {asset.mediaType === "pdf" && (
+                    <div className="card-caption" title={asset.originalFilename}>
+                      {asset.originalFilename}
+                    </div>
+                  )}
+                </a>
+              ) : (
+                <Link to={`/media/${asset.id}`} className="card-link">
+                  <figure className="card-thumb-wrap" style={{ aspectRatio: `${thumbnailRatios[asset.id] ?? 1}` }}>
+                    <img
+                      src={asset.thumbnailUrl}
+                      alt={asset.originalFilename}
+                      className="card-thumb"
+                      loading="lazy"
+                      onLoad={(event) => handleThumbnailLoad(asset.id, event)}
+                    />
+                    {getMediaBadgeLabel(asset.mediaType) && <span className="card-badge">{getMediaBadgeLabel(asset.mediaType)}</span>}
+                  </figure>
+                </Link>
+              )}
             </article>
           ))}
         </section>
@@ -354,15 +369,15 @@ export function MediaDetailPage({
         <div className="empty-state">正在加载详情…</div>
       ) : !asset ? (
         <div className="empty-state">未找到媒体。</div>
+      ) : asset.mediaType === "pdf" ? (
+        <div className="empty-state">PDF 不提供详情页，请返回列表后直接打开原文件。</div>
       ) : (
         <section className="detail-panel">
           <div className="detail-preview">
             {asset.mediaType === "image" ? (
               <img src={asset.viewUrl} alt={asset.originalFilename} className="detail-image" />
-            ) : asset.mediaType === "video" ? (
-              <video src={asset.viewUrl} controls className="detail-video" />
             ) : (
-              <iframe src={asset.viewUrl} title={asset.originalFilename} className="detail-pdf" data-testid="detail-pdf-frame" />
+              <video src={asset.viewUrl} controls className="detail-video" />
             )}
           </div>
           <div className="detail-meta">

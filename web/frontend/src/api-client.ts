@@ -8,7 +8,6 @@ export type ApiAsset = {
   sizeBytes: number;
   createdAt: string;
   deletedAt?: string;
-  detailUrl: string;
   viewUrl: string;
   thumbnailUrl: string;
   downloadUrl: string;

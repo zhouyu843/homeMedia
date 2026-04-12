@@ -98,7 +98,16 @@ func TestProtectedRoutesHandleUnauthenticatedRequests(t *testing.T) {
 func TestSPARoutesServeShellWhenAuthenticated(t *testing.T) {
   gin.SetMode(gin.TestMode)
 
-  router := testRouter(t, &memoryRepository{}, mustLocalStore(t))
+  router := testRouter(t, &memoryRepository{assets: []media.Asset{{
+    ID:               "asset-1",
+    OriginalFilename: "photo.jpg",
+    StoredFilename:   "photo.jpg",
+    MediaType:        media.MediaTypeImage,
+    MIMEType:         "image/jpeg",
+    SizeBytes:        7,
+    StoragePath:      "20260403/photo.jpg",
+    CreatedAt:        time.Now().UTC(),
+  }}}, mustLocalStore(t))
   sessionCookie, _ := loginSession(t, router)
 
   for _, path := range []string{"/media", "/trash", "/media/asset-1"} {
@@ -154,6 +163,9 @@ func TestUploadListDetailAndDownloadFlowOverAPI(t *testing.T) {
   if !strings.Contains(listResp.Body.String(), "photo.jpg") {
     t.Fatalf("expected list payload to contain uploaded filename, got %q", listResp.Body.String())
   }
+  if strings.Contains(listResp.Body.String(), "detailUrl") {
+    t.Fatalf("expected list payload to omit detailUrl, got %q", listResp.Body.String())
+  }
 
   detailResp := httptest.NewRecorder()
   detailReq := httptest.NewRequest(http.MethodGet, "/api/media/"+uploadPayload.Asset.ID, nil)
@@ -164,6 +176,9 @@ func TestUploadListDetailAndDownloadFlowOverAPI(t *testing.T) {
   }
   if !strings.Contains(detailResp.Body.String(), "/media/"+uploadPayload.Asset.ID+"/view") {
     t.Fatalf("expected detail payload to contain view url, got %q", detailResp.Body.String())
+  }
+  if strings.Contains(detailResp.Body.String(), "detailUrl") {
+    t.Fatalf("expected detail payload to omit detailUrl, got %q", detailResp.Body.String())
   }
 
   viewResp := httptest.NewRecorder()
@@ -193,7 +208,7 @@ func TestUploadListDetailAndDownloadFlowOverAPI(t *testing.T) {
   }
 }
 
-func TestUploadPDFListDetailDownloadAndTrashFlowOverAPI(t *testing.T) {
+func TestUploadPDFListViewDownloadAndTrashFlowOverAPI(t *testing.T) {
   gin.SetMode(gin.TestMode)
 
   repo := &memoryRepository{}
@@ -238,6 +253,9 @@ func TestUploadPDFListDetailDownloadAndTrashFlowOverAPI(t *testing.T) {
   if !strings.Contains(listResp.Body.String(), `"mediaType":"pdf"`) {
     t.Fatalf("expected list payload to contain pdf media type, got %q", listResp.Body.String())
   }
+  if strings.Contains(listResp.Body.String(), "detailUrl") {
+    t.Fatalf("expected list payload to omit detailUrl, got %q", listResp.Body.String())
+  }
 
   detailResp := httptest.NewRecorder()
   detailReq := httptest.NewRequest(http.MethodGet, "/api/media/"+uploadPayload.Asset.ID, nil)
@@ -248,6 +266,20 @@ func TestUploadPDFListDetailDownloadAndTrashFlowOverAPI(t *testing.T) {
   }
   if !strings.Contains(detailResp.Body.String(), "manual.pdf") {
     t.Fatalf("expected detail payload to contain pdf filename, got %q", detailResp.Body.String())
+  }
+  if strings.Contains(detailResp.Body.String(), "detailUrl") {
+    t.Fatalf("expected detail payload to omit detailUrl, got %q", detailResp.Body.String())
+  }
+
+  showResp := httptest.NewRecorder()
+  showReq := httptest.NewRequest(http.MethodGet, "/media/"+uploadPayload.Asset.ID, nil)
+  showReq.AddCookie(sessionCookie)
+  router.ServeHTTP(showResp, showReq)
+  if showResp.Code != http.StatusNotFound {
+    t.Fatalf("expected pdf detail page status 404, got %d", showResp.Code)
+  }
+  if !strings.Contains(showResp.Body.String(), "detail page not available for pdf") {
+    t.Fatalf("expected pdf detail page to be unavailable, got %q", showResp.Body.String())
   }
 
   viewResp := httptest.NewRecorder()

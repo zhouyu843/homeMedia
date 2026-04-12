@@ -36,7 +36,6 @@ function makeAsset(overrides?: Partial<ApiAsset>): ApiAsset {
     mimeType: "image/jpeg",
     sizeBytes: 512,
     createdAt: "2026-04-06T10:00:00Z",
-    detailUrl: "/media/asset-1",
     viewUrl: "/media/asset-1/view",
     thumbnailUrl: "/media/asset-1/thumbnail",
     downloadUrl: "/media/asset-1/download",
@@ -110,7 +109,7 @@ describe("UploadIslandApp", () => {
   it("keeps failed items in queue and allows retry", async () => {
     uploadFileMock.mockRejectedValueOnce(new Error("network error"));
     uploadFileMock.mockResolvedValueOnce({
-      asset: makeAsset({ id: "asset-2", detailUrl: "/media/asset-2" }),
+      asset: makeAsset({ id: "asset-2" }),
       existing: false
     });
 
@@ -137,11 +136,11 @@ describe("UploadIslandApp", () => {
     const onUploadResolved = vi.fn();
     const duplicateError = Object.assign(new Error("发现回收站中的同内容文件，请选择恢复旧项或继续新建"), {
       code: "trashed_duplicate",
-      asset: makeAsset({ id: "asset-deleted", detailUrl: "/media/asset-deleted" })
+      asset: makeAsset({ id: "asset-deleted" })
     });
     uploadFileMock.mockRejectedValueOnce(duplicateError);
     uploadFileMock.mockResolvedValueOnce({
-      asset: makeAsset({ id: "asset-deleted", detailUrl: "/media/asset-deleted" }),
+      asset: makeAsset({ id: "asset-deleted" }),
       existing: false,
       restored: true
     });
@@ -165,7 +164,7 @@ describe("UploadIslandApp", () => {
     expect(screen.getByText("最近上传结果")).toBeTruthy();
     expect(within(screen.getByText("最近上传结果").closest("div") as HTMLElement).getAllByText("restore.jpg").length).toBeGreaterThan(0);
     expect(onUploadResolved).toHaveBeenCalledWith({
-      asset: makeAsset({ id: "asset-deleted", detailUrl: "/media/asset-deleted" }),
+      asset: makeAsset({ id: "asset-deleted" }),
       existing: false,
       restored: true
     });
