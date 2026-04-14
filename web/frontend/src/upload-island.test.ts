@@ -211,4 +211,15 @@ describe("UploadIslandApp", () => {
     expect(screen.getByText("PDF")).toBeTruthy();
     expect(createObjectURL).not.toHaveBeenCalled();
   });
+
+  it("accepts dropped pdf files when browser omits mime type", async () => {
+    render(React.createElement(UploadIslandApp, { config: makeConfig() }));
+
+    const file = makeFile("dragged.pdf", "", "%PDF-1.4");
+    fireEvent.drop(window, { dataTransfer: createDataTransfer([file]) });
+
+    await screen.findByText("dragged.pdf");
+    expect(screen.getByText("PDF")).toBeTruthy();
+    expect(screen.queryByText("不支持的文件类型：未知类型")).toBeNull();
+  });
 });

@@ -36,6 +36,8 @@ export type UploadConfig = {
   uploadUrl: string;
 };
 
+const PDF_MIME_TYPE = "application/pdf";
+
 type ApiEnvelope<T> = T & {
   code?: string;
   message?: string;
@@ -175,7 +177,11 @@ export async function uploadFile(
 }
 
 export function validateFile(config: UploadConfig, file: File): string | null {
-  if (config.allowedMimeTypes.size > 0 && !config.allowedMimeTypes.has(file.type)) {
+  const normalizedName = (file.name ?? "").toLowerCase();
+  const allowsPdfByName =
+    config.allowedMimeTypes.has(PDF_MIME_TYPE) && normalizedName.endsWith(".pdf") && file.type.trim() === "";
+
+  if (config.allowedMimeTypes.size > 0 && !config.allowedMimeTypes.has(file.type) && !allowsPdfByName) {
     return `不支持的文件类型：${file.type || "未知类型"}`;
   }
   if (config.maxUploadBytes > 0 && file.size > config.maxUploadBytes) {

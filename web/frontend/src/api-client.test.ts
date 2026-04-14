@@ -36,6 +36,18 @@ describe("validateFile", () => {
     const file = { type: "application/pdf", size: 512 } as File;
     expect(validateFile(config, file)).toBeNull();
   });
+
+  it("accepts pdf file by extension when drag payload omits mime type", () => {
+    const config = makeConfig();
+    const file = { name: "dragged.pdf", type: "", size: 512 } as File;
+    expect(validateFile(config, file)).toBeNull();
+  });
+
+  it("still rejects unknown files when mime type is missing", () => {
+    const config = makeConfig();
+    const file = { name: "dragged.txt", type: "", size: 512 } as File;
+    expect(validateFile(config, file)).toContain("不支持的文件类型");
+  });
 });
 
 describe("formatBytes", () => {
