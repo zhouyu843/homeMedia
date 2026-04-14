@@ -36,10 +36,26 @@ func New(rootDir string) (Store, error) {
 }
 
 func (s Store) Save(_ context.Context, originalFilename string, source io.Reader) (media.StoredFile, error) {
-	extension := strings.ToLower(filepath.Ext(originalFilename))
+	return s.saveFile("", strings.ToLower(filepath.Ext(originalFilename)), source)
+}
+
+func (s Store) SaveThumbnail(_ context.Context, assetID string, source io.Reader) (media.StoredFile, error) {
+	return s.saveFile("thumbnails", assetID+".jpg", source)
+}
+
+func (s Store) saveFile(directoryPrefix string, filename string, source io.Reader) (media.StoredFile, error) {
+	fileName := filename
+	if directoryPrefix == "" {
+		extension := strings.ToLower(filepath.Ext(filename))
+		fileName = uuid.NewString() + extension
+	}
+
 	folder := s.now().UTC().Format("20060102")
-	storedFilename := uuid.NewString() + extension
-	storagePath := filepath.ToSlash(filepath.Join(folder, storedFilename))
+	storedFilename := fileName
+	storagePath := filepath.ToSlash(filepath.Join(directoryPrefix, folder, storedFilename))
+	if directoryPrefix == "" {
+		storagePath = filepath.ToSlash(filepath.Join(folder, storedFilename))
+	}
 
 	fullPath, err := s.resolvePath(storagePath)
 	if err != nil {

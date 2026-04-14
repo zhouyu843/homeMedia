@@ -1,6 +1,7 @@
 package http
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,6 +12,12 @@ func NewRouter(handler Handler) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), SecurityHeadersMiddleware())
 	router.Static("/static", "./web/static")
+	router.StaticFile("/favicon.svg", "./web/static/app/favicon.svg")
+	redirectFavicon := func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/favicon.svg")
+	}
+	router.GET("/favicon.ico", redirectFavicon)
+	router.HEAD("/favicon.ico", redirectFavicon)
 
 	loginLimiter := NewIPRateLimiter(rate.Every(6*time.Second), 5)
 	uploadLimiter := NewIPRateLimiter(rate.Every(2*time.Second), 10)

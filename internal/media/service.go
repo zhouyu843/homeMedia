@@ -23,6 +23,7 @@ type Service struct {
 	repository Repository
 	fileStore  FileStore
 	now        func() time.Time
+	thumbnailGenerator func(ctx context.Context, file io.Reader, mediaType MediaType) (string, []byte, error)
 }
 
 func NewService(repository Repository, fileStore FileStore) Service {
@@ -30,6 +31,7 @@ func NewService(repository Repository, fileStore FileStore) Service {
 		repository: repository,
 		fileStore:  fileStore,
 		now:        time.Now,
+		thumbnailGenerator: generateThumbnail,
 	}
 }
 
@@ -86,13 +88,16 @@ func (s Service) Upload(ctx context.Context, input UploadInput) (UploadResult, e
 		return UploadResult{}, fmt.Errorf("rewind upload temp file: %w", err)
 	}
 
+	assetID := uuid.NewString()
 	storedFile, err := s.fileStore.Save(ctx, input.OriginalFilename, tempFile)
 	if err != nil {
 		return UploadResult{}, err
 	}
 
+	thumbnailStoragePath, thumbnailErr := s.storeThumbnailFromTempFile(ctx, assetID, tempFile, mediaType)
+
 	asset := Asset{
-		ID:               uuid.NewString(),
+		ID:               assetID,
 		OriginalFilename: input.OriginalFilename,
 		StoredFilename:   storedFile.StoredFilename,
 		MediaType:        mediaType,
@@ -100,12 +105,16 @@ func (s Service) Upload(ctx context.Context, input UploadInput) (UploadResult, e
 		SizeBytes:        sizeBytes,
 		ContentHash:      contentHash,
 		StoragePath:      storedFile.StoragePath,
+		ThumbnailStoragePath: thumbnailStoragePath,
 		CreatedAt:        s.now().UTC(),
 	}
 
 	savedAsset, err := s.repository.Save(ctx, asset)
 	if err != nil {
 		_ = s.fileStore.Delete(storedFile.StoragePath)
+		if thumbnailStoragePath != "" {
+			_ = s.fileStore.Delete(thumbnailStoragePath)
+		}
 		if errors.Is(err, ErrDuplicateContentHash) {
 			existingAsset, findErr := s.repository.FindByContentHash(ctx, contentHash)
 			if findErr == nil {
@@ -116,6 +125,9 @@ func (s Service) Upload(ctx context.Context, input UploadInput) (UploadResult, e
 			}
 		}
 		return UploadResult{}, err
+	}
+	if thumbnailErr != nil {
+		savedAsset.ThumbnailStoragePath = ""
 	}
 
 	return UploadResult{Asset: savedAsset, Created: true}, nil
@@ -174,6 +186,12 @@ func (s Service) DeletePermanently(ctx context.Context, id string) error {
 		return err
 	}
 
+	if asset.ThumbnailStoragePath != "" {
+		if err := s.fileStore.Delete(asset.ThumbnailStoragePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+
 	if storagePathRefCount > 0 {
 		return nil
 	}
@@ -201,13 +219,12 @@ func (s Service) EmptyTrash(ctx context.Context) error {
 }
 
 func (s Service) Thumbnail(ctx context.Context, id string) (string, []byte, error) {
-	asset, file, err := s.Download(ctx, id)
+	asset, err := s.repository.FindByID(ctx, id)
 	if err != nil {
 		return "", nil, err
 	}
-	defer file.Close()
 
-	return s.generateThumbnail(ctx, file, asset.MediaType)
+	return s.thumbnailForAsset(ctx, asset)
 }
 
 func (s Service) TrashThumbnail(ctx context.Context, id string) (string, []byte, error) {
@@ -216,13 +233,39 @@ func (s Service) TrashThumbnail(ctx context.Context, id string) (string, []byte,
 		return "", nil, err
 	}
 
+	return s.thumbnailForAsset(ctx, asset)
+}
+
+func (s Service) thumbnailForAsset(ctx context.Context, asset Asset) (string, []byte, error) {
+	if asset.ThumbnailStoragePath != "" {
+		file, err := s.fileStore.Open(asset.ThumbnailStoragePath)
+		if err == nil {
+			defer file.Close()
+			thumbnail, readErr := io.ReadAll(file)
+			if readErr == nil && len(thumbnail) > 0 {
+				return "image/jpeg", thumbnail, nil
+			}
+		}
+	}
+
 	_, file, err := s.openAssetFile(asset)
 	if err != nil {
 		return "", nil, err
 	}
 	defer file.Close()
 
-	return s.generateThumbnail(ctx, file, asset.MediaType)
+	contentType, thumbnail, err := s.thumbnailGenerator(ctx, file, asset.MediaType)
+	if err != nil {
+		return "", nil, err
+	}
+
+	thumbnailStoragePath, persistErr := s.persistThumbnail(ctx, asset.ID, thumbnail)
+	if persistErr == nil && thumbnailStoragePath != "" {
+		asset.ThumbnailStoragePath = thumbnailStoragePath
+		_ = s.repository.UpdateThumbnailStoragePath(ctx, asset.ID, thumbnailStoragePath)
+	}
+
+	return contentType, thumbnail, nil
 }
 
 func (s Service) openAssetFile(asset Asset) (Asset, io.ReadSeekCloser, error) {
@@ -240,7 +283,7 @@ func (s Service) openAssetFile(asset Asset) (Asset, io.ReadSeekCloser, error) {
 	return asset, file, nil
 }
 
-func (s Service) generateThumbnail(ctx context.Context, file io.Reader, mediaType MediaType) (string, []byte, error) {
+func generateThumbnail(ctx context.Context, file io.Reader, mediaType MediaType) (string, []byte, error) {
 	var (
 		thumb []byte
 		err   error
@@ -255,6 +298,32 @@ func (s Service) generateThumbnail(ctx context.Context, file io.Reader, mediaTyp
 	}
 
 	return "image/jpeg", thumb, nil
+}
+
+func (s Service) storeThumbnailFromTempFile(ctx context.Context, assetID string, tempFile *os.File, mediaType MediaType) (string, error) {
+	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rewind upload temp file for thumbnail: %w", err)
+	}
+
+	_, thumbnail, err := s.thumbnailGenerator(ctx, tempFile, mediaType)
+	if err != nil {
+		return "", err
+	}
+
+	return s.persistThumbnail(ctx, assetID, thumbnail)
+}
+
+func (s Service) persistThumbnail(ctx context.Context, assetID string, thumbnail []byte) (string, error) {
+	if len(thumbnail) == 0 {
+		return "", ErrThumbnailGeneration
+	}
+
+	storedThumbnail, err := s.fileStore.SaveThumbnail(ctx, assetID, bytes.NewReader(thumbnail))
+	if err != nil {
+		return "", err
+	}
+
+	return storedThumbnail.StoragePath, nil
 }
 
 func mediaTypeFromMIME(mimeType string) (MediaType, error) {
@@ -315,7 +384,43 @@ func generateThumbnailWithFFmpeg(ctx context.Context, source io.Reader, mediaTyp
 
 	filter := "scale=360:-1"
 	if mediaType == MediaTypeVideo {
+		inputPath, cleanup, err := writeThumbnailTempFile(source, "home-media-video-thumb-*")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
 		filter = "thumbnail,scale=360:-1"
+		cmd := exec.CommandContext(
+			tctx,
+			"ffmpeg",
+			"-hide_banner",
+			"-loglevel", "error",
+			"-i", inputPath,
+			"-vf", filter,
+			"-frames:v", "1",
+			"-f", "image2pipe",
+			"-vcodec", "mjpeg",
+			"pipe:1",
+		)
+
+		var out bytes.Buffer
+		var errOut bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &errOut
+
+		if err := cmd.Run(); err != nil {
+			if strings.TrimSpace(errOut.String()) != "" {
+				return nil, fmt.Errorf("%w: %s", ErrThumbnailGeneration, strings.TrimSpace(errOut.String()))
+			}
+			return nil, fmt.Errorf("%w: %v", ErrThumbnailGeneration, err)
+		}
+
+		if out.Len() == 0 {
+			return nil, ErrThumbnailGeneration
+		}
+
+		return out.Bytes(), nil
 	}
 
 	cmd := exec.CommandContext(
@@ -349,6 +454,33 @@ func generateThumbnailWithFFmpeg(ctx context.Context, source io.Reader, mediaTyp
 	}
 
 	return out.Bytes(), nil
+}
+
+func writeThumbnailTempFile(source io.Reader, pattern string) (string, func(), error) {
+	inputFile, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: create temp input file: %v", ErrThumbnailGeneration, err)
+	}
+
+	if _, err := io.Copy(inputFile, source); err != nil {
+		inputPath := inputFile.Name()
+		_ = inputFile.Close()
+		_ = os.Remove(inputPath)
+		return "", nil, fmt.Errorf("%w: buffer temp input file: %v", ErrThumbnailGeneration, err)
+	}
+
+	if err := inputFile.Close(); err != nil {
+		inputPath := inputFile.Name()
+		_ = os.Remove(inputPath)
+		return "", nil, fmt.Errorf("%w: close temp input file: %v", ErrThumbnailGeneration, err)
+	}
+
+	inputPath := inputFile.Name()
+	cleanup := func() {
+		_ = os.Remove(inputPath)
+	}
+
+	return inputPath, cleanup, nil
 }
 
 func generateThumbnailWithPdftoppm(ctx context.Context, source io.Reader) ([]byte, error) {

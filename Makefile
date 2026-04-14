@@ -24,3 +24,6 @@ frontend-dev:
 
 frontend-test:
 	docker compose run --rm app sh -lc 'cd web/frontend && npm run test'
+
+backfill-video-thumbnails:
+	docker compose run --rm app go run ./cmd/backfill-thumbnails -media-types=video

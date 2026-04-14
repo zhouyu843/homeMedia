@@ -44,6 +44,39 @@ func TestStoreSaveAndOpenRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreSaveThumbnailStoresJPEGUnderThumbnailsDirectory(t *testing.T) {
+	rootDir := t.TempDir()
+	store, err := New(rootDir)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	storedFile, err := store.SaveThumbnail(context.Background(), "asset-1", strings.NewReader("thumb-data"))
+	if err != nil {
+		t.Fatalf("SaveThumbnail returned error: %v", err)
+	}
+	if !strings.HasPrefix(storedFile.StoragePath, "thumbnails/") {
+		t.Fatalf("expected thumbnail path under thumbnails/, got %q", storedFile.StoragePath)
+	}
+	if filepath.Ext(storedFile.StoragePath) != ".jpg" {
+		t.Fatalf("expected thumbnail extension .jpg, got %q", storedFile.StoragePath)
+	}
+
+	file, err := store.Open(storedFile.StoragePath)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if string(content) != "thumb-data" {
+		t.Fatalf("expected thumbnail content to match, got %q", string(content))
+	}
+}
+
 func TestStoreRejectsPathTraversal(t *testing.T) {
 	store, err := New(t.TempDir())
 	if err != nil {

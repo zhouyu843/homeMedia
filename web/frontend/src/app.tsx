@@ -202,10 +202,10 @@ export function MediaListPage({
   }, []);
 
   const handleCardMediaLoad = React.useCallback(
-    (assetId: string, event: React.SyntheticEvent<HTMLImageElement | HTMLVideoElement>) => {
+    (assetId: string, event: React.SyntheticEvent<HTMLImageElement>) => {
       const element = event.currentTarget;
-      const width = element instanceof HTMLVideoElement ? element.videoWidth : element.naturalWidth;
-      const height = element instanceof HTMLVideoElement ? element.videoHeight : element.naturalHeight;
+      const width = element.naturalWidth;
+      const height = element.naturalHeight;
       if (!width || !height) {
         return;
       }
@@ -227,23 +227,6 @@ export function MediaListPage({
 
   const renderCardPreview = React.useCallback(
     (asset: ApiAsset) => {
-      if (asset.mediaType === "video") {
-        return (
-          <video
-            src={asset.viewUrl}
-            aria-label={asset.originalFilename}
-            className="card-thumb card-video-preview"
-            poster={asset.thumbnailUrl}
-            preload="metadata"
-            autoPlay
-            muted
-            loop
-            playsInline
-            onLoadedMetadata={(event) => handleCardMediaLoad(asset.id, event)}
-          />
-        );
-      }
-
       return (
         <img
           src={asset.thumbnailUrl}

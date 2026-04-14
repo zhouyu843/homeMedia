@@ -22,6 +22,7 @@ type Asset struct {
 	SizeBytes        int64
 	ContentHash      string
 	StoragePath      string
+	ThumbnailStoragePath string
 	CreatedAt        time.Time
 	DeletedAt        *time.Time
 }

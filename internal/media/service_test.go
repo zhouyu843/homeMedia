@@ -109,6 +109,92 @@ func TestServiceUploadStoresPDFMetadata(t *testing.T) {
 	}
 }
 
+func TestServiceUploadStoresThumbnailPathWhenGenerationSucceeds(t *testing.T) {
+	repo := &fakeRepository{}
+	store := &fakeFileStore{
+		storedFile: StoredFile{
+			StoredFilename: "stored.mp4",
+			StoragePath:    "20260414/stored.mp4",
+			SizeBytes:      8,
+		},
+		thumbnailFile: StoredFile{
+			StoredFilename: "asset-thumb.jpg",
+			StoragePath:    "thumbnails/20260414/asset-thumb.jpg",
+			SizeBytes:      12,
+		},
+	}
+	service := NewService(repo, store)
+	service.now = func() time.Time {
+		return time.Date(2026, 4, 14, 9, 0, 0, 0, time.UTC)
+	}
+	service.thumbnailGenerator = func(_ context.Context, _ io.Reader, mediaType MediaType) (string, []byte, error) {
+		if mediaType != MediaTypeVideo {
+			t.Fatalf("expected video media type, got %q", mediaType)
+		}
+		return "image/jpeg", []byte("thumb-bytes"), nil
+	}
+
+	result, err := service.Upload(context.Background(), UploadInput{
+		OriginalFilename: "clip.mp4",
+		MIMEType:         "video/mp4",
+		Reader:           strings.NewReader("12345678"),
+	})
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if !result.Created {
+		t.Fatalf("expected created upload result, got %+v", result)
+	}
+	if result.Asset.ThumbnailStoragePath != "thumbnails/20260414/asset-thumb.jpg" {
+		t.Fatalf("expected thumbnail path on result asset, got %q", result.Asset.ThumbnailStoragePath)
+	}
+	if repo.savedAsset.ThumbnailStoragePath != "thumbnails/20260414/asset-thumb.jpg" {
+		t.Fatalf("expected thumbnail path to be persisted, got %q", repo.savedAsset.ThumbnailStoragePath)
+	}
+	if store.saveThumbnailCalls != 1 {
+		t.Fatalf("expected thumbnail to be saved once, got %d", store.saveThumbnailCalls)
+	}
+	if store.savedThumbnailAssetID != repo.savedAsset.ID {
+		t.Fatalf("expected thumbnail save to use asset ID %q, got %q", repo.savedAsset.ID, store.savedThumbnailAssetID)
+	}
+}
+
+func TestServiceUploadContinuesWhenThumbnailGenerationFails(t *testing.T) {
+	repo := &fakeRepository{}
+	store := &fakeFileStore{
+		storedFile: StoredFile{
+			StoredFilename: "stored.mp4",
+			StoragePath:    "20260414/stored.mp4",
+			SizeBytes:      8,
+		},
+	}
+	service := NewService(repo, store)
+	service.thumbnailGenerator = func(_ context.Context, _ io.Reader, _ MediaType) (string, []byte, error) {
+		return "", nil, ErrThumbnailGeneration
+	}
+
+	result, err := service.Upload(context.Background(), UploadInput{
+		OriginalFilename: "clip.mp4",
+		MIMEType:         "video/mp4",
+		Reader:           strings.NewReader("12345678"),
+	})
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if !result.Created {
+		t.Fatalf("expected created upload result, got %+v", result)
+	}
+	if result.Asset.ThumbnailStoragePath != "" {
+		t.Fatalf("expected empty thumbnail path when generation fails, got %q", result.Asset.ThumbnailStoragePath)
+	}
+	if repo.savedAsset.ThumbnailStoragePath != "" {
+		t.Fatalf("expected repository thumbnail path to stay empty, got %q", repo.savedAsset.ThumbnailStoragePath)
+	}
+	if store.saveThumbnailCalls != 0 {
+		t.Fatalf("expected thumbnail file not to be saved, got %d calls", store.saveThumbnailCalls)
+	}
+}
+
 func TestServiceUploadRejectsUnsupportedType(t *testing.T) {
 	service := NewService(&fakeRepository{}, &fakeFileStore{})
 
@@ -322,6 +408,80 @@ func TestServiceDeletePermanentlyMissingFileStillDeletesRecord(t *testing.T) {
 	}
 }
 
+func TestServiceDeletePermanentlyDeletesThumbnailFile(t *testing.T) {
+	repo := &fakeRepository{
+		deletedAssetByID: map[string]Asset{
+			"asset-1": {
+				ID:                   "asset-1",
+				StoragePath:          "20260403/photo.jpg",
+				ThumbnailStoragePath: "thumbnails/20260403/asset-1.jpg",
+				DeletedAt:            timePointer(time.Now().UTC()),
+			},
+		},
+		storagePathCounts: map[string]int{"20260403/photo.jpg": 0},
+	}
+	store := &fakeFileStore{}
+	service := NewService(repo, store)
+
+	err := service.DeletePermanently(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatalf("DeletePermanently returned error: %v", err)
+	}
+	if len(store.deletedPaths) != 2 {
+		t.Fatalf("expected original file and thumbnail cleanup, got %v", store.deletedPaths)
+	}
+	if store.deletedPaths[0] != "thumbnails/20260403/asset-1.jpg" {
+		t.Fatalf("expected thumbnail cleanup first, got %q", store.deletedPaths[0])
+	}
+	if store.deletedPaths[1] != "20260403/photo.jpg" {
+		t.Fatalf("expected original file cleanup second, got %q", store.deletedPaths[1])
+	}
+}
+
+func TestServiceThumbnailPersistsGeneratedThumbnailForLegacyAsset(t *testing.T) {
+	asset := Asset{
+		ID:               "asset-1",
+		OriginalFilename: "clip.mp4",
+		MediaType:        MediaTypeVideo,
+		MIMEType:         "video/mp4",
+		StoragePath:      "20260414/clip.mp4",
+		CreatedAt:        time.Now().UTC(),
+	}
+	repo := &fakeRepository{assetByID: map[string]Asset{"asset-1": asset}}
+	store := &fakeFileStore{
+		openFile: readSeekNopCloser{Reader: strings.NewReader("video-bytes")},
+		thumbnailFile: StoredFile{
+			StoredFilename: "asset-1.jpg",
+			StoragePath:    "thumbnails/20260414/asset-1.jpg",
+			SizeBytes:      11,
+		},
+	}
+	service := NewService(repo, store)
+	service.thumbnailGenerator = func(_ context.Context, _ io.Reader, mediaType MediaType) (string, []byte, error) {
+		if mediaType != MediaTypeVideo {
+			t.Fatalf("expected video media type, got %q", mediaType)
+		}
+		return "image/jpeg", []byte("thumb-bytes"), nil
+	}
+
+	contentType, thumbnail, err := service.Thumbnail(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatalf("Thumbnail returned error: %v", err)
+	}
+	if contentType != "image/jpeg" {
+		t.Fatalf("expected image/jpeg, got %q", contentType)
+	}
+	if string(thumbnail) != "thumb-bytes" {
+		t.Fatalf("expected generated thumbnail bytes, got %q", string(thumbnail))
+	}
+	if repo.updatedThumbnailStoragePaths[asset.ID] != "thumbnails/20260414/asset-1.jpg" {
+		t.Fatalf("expected thumbnail path to be backfilled, got %q", repo.updatedThumbnailStoragePaths[asset.ID])
+	}
+	if store.saveThumbnailCalls != 1 {
+		t.Fatalf("expected thumbnail persistence call, got %d", store.saveThumbnailCalls)
+	}
+}
+
 func TestServiceRestoreClearsDeletedAsset(t *testing.T) {
 	repo := &fakeRepository{
 		deletedAssetByID: map[string]Asset{
@@ -465,6 +625,7 @@ type fakeRepository struct {
 	deletedAssetByContentHash      map[string]Asset
 	assetsWithoutContentHashBySize map[int64][]Asset
 	updatedContentHashes           map[string]string
+	updatedThumbnailStoragePaths   map[string]string
 	listAssets                     []Asset
 	trashAssets                    []Asset
 	storagePathCounts              map[string]int
@@ -530,6 +691,22 @@ func (f *fakeRepository) UpdateContentHash(_ context.Context, id string, content
 		f.updatedContentHashes = map[string]string{}
 	}
 	f.updatedContentHashes[id] = contentHash
+	return nil
+}
+
+func (f *fakeRepository) UpdateThumbnailStoragePath(_ context.Context, id string, thumbnailStoragePath string) error {
+	if f.updatedThumbnailStoragePaths == nil {
+		f.updatedThumbnailStoragePaths = map[string]string{}
+	}
+	f.updatedThumbnailStoragePaths[id] = thumbnailStoragePath
+	if asset, ok := f.assetByID[id]; ok {
+		asset.ThumbnailStoragePath = thumbnailStoragePath
+		f.assetByID[id] = asset
+	}
+	if asset, ok := f.deletedAssetByID[id]; ok {
+		asset.ThumbnailStoragePath = thumbnailStoragePath
+		f.deletedAssetByID[id] = asset
+	}
 	return nil
 }
 
@@ -610,13 +787,18 @@ func (f *fakeRepository) CountByStoragePath(_ context.Context, storagePath strin
 }
 
 type fakeFileStore struct {
-	storedFile  StoredFile
-	saveErr     error
-	openFile    io.ReadSeekCloser
-	openErr     error
-	deletedPath string
-	deleteErr   error
-	saveCalls   int
+	storedFile            StoredFile
+	thumbnailFile         StoredFile
+	saveErr               error
+	saveThumbnailErr      error
+	openFile              io.ReadSeekCloser
+	openErr               error
+	deletedPath           string
+	deletedPaths          []string
+	deleteErr             error
+	saveCalls             int
+	saveThumbnailCalls    int
+	savedThumbnailAssetID string
 }
 
 func (f *fakeFileStore) Save(_ context.Context, _ string, _ io.Reader) (StoredFile, error) {
@@ -625,6 +807,15 @@ func (f *fakeFileStore) Save(_ context.Context, _ string, _ io.Reader) (StoredFi
 		return StoredFile{}, f.saveErr
 	}
 	return f.storedFile, nil
+}
+
+func (f *fakeFileStore) SaveThumbnail(_ context.Context, assetID string, _ io.Reader) (StoredFile, error) {
+	f.saveThumbnailCalls++
+	f.savedThumbnailAssetID = assetID
+	if f.saveThumbnailErr != nil {
+		return StoredFile{}, f.saveThumbnailErr
+	}
+	return f.thumbnailFile, nil
 }
 
 func (f *fakeFileStore) Open(_ string) (io.ReadSeekCloser, error) {
@@ -636,6 +827,7 @@ func (f *fakeFileStore) Open(_ string) (io.ReadSeekCloser, error) {
 
 func (f *fakeFileStore) Delete(storagePath string) error {
 	f.deletedPath = storagePath
+	f.deletedPaths = append(f.deletedPaths, storagePath)
 	return f.deleteErr
 }
 
@@ -673,6 +865,10 @@ func (d *duplicateOnSaveRepository) FindWithoutContentHashBySize(_ context.Conte
 }
 
 func (d *duplicateOnSaveRepository) UpdateContentHash(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
+func (d *duplicateOnSaveRepository) UpdateThumbnailStoragePath(_ context.Context, _ string, _ string) error {
 	return nil
 }
 

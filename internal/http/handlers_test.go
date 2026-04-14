@@ -95,6 +95,38 @@ func TestProtectedRoutesHandleUnauthenticatedRequests(t *testing.T) {
   }
 }
 
+func TestFaviconRedirectsToSVG(t *testing.T) {
+  gin.SetMode(gin.TestMode)
+
+  router := testRouter(t, &memoryRepository{}, mustLocalStore(t))
+
+  resp := httptest.NewRecorder()
+  router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/favicon.ico", nil))
+
+  if resp.Code != http.StatusMovedPermanently {
+    t.Fatalf("expected favicon redirect 301, got %d", resp.Code)
+  }
+  if location := resp.Header().Get("Location"); location != "/favicon.svg" {
+    t.Fatalf("expected redirect to /favicon.svg, got %q", location)
+  }
+}
+
+func TestFaviconHeadRedirectsToSVG(t *testing.T) {
+  gin.SetMode(gin.TestMode)
+
+  router := testRouter(t, &memoryRepository{}, mustLocalStore(t))
+
+  resp := httptest.NewRecorder()
+  router.ServeHTTP(resp, httptest.NewRequest(http.MethodHead, "/favicon.ico", nil))
+
+  if resp.Code != http.StatusMovedPermanently {
+    t.Fatalf("expected favicon HEAD redirect 301, got %d", resp.Code)
+  }
+  if location := resp.Header().Get("Location"); location != "/favicon.svg" {
+    t.Fatalf("expected HEAD redirect to /favicon.svg, got %q", location)
+  }
+}
+
 func TestSPARoutesServeShellWhenAuthenticated(t *testing.T) {
   gin.SetMode(gin.TestMode)
 
@@ -699,6 +731,19 @@ func (m *memoryRepository) UpdateContentHash(_ context.Context, id string, conte
   return media.ErrNotFound
 }
 
+func (m *memoryRepository) UpdateThumbnailStoragePath(_ context.Context, id string, thumbnailStoragePath string) error {
+  m.mu.Lock()
+  defer m.mu.Unlock()
+  for index, asset := range m.assets {
+    if asset.ID == id {
+      asset.ThumbnailStoragePath = thumbnailStoragePath
+      m.assets[index] = asset
+      return nil
+    }
+  }
+  return media.ErrNotFound
+}
+
 func (m *memoryRepository) ListRecent(_ context.Context) ([]media.Asset, error) {
   m.mu.Lock()
   defer m.mu.Unlock()
@@ -781,6 +826,10 @@ func (m *memoryRepository) CountByStoragePath(_ context.Context, storagePath str
 type brokenStore struct{}
 
 func (brokenStore) Save(_ context.Context, _ string, _ io.Reader) (media.StoredFile, error) {
+  return media.StoredFile{}, nil
+}
+
+func (brokenStore) SaveThumbnail(_ context.Context, _ string, _ io.Reader) (media.StoredFile, error) {
   return media.StoredFile{}, nil
 }
 

@@ -91,12 +91,10 @@ describe("MediaListPage", () => {
     expect(imageThumb).toBeTruthy();
     expect(imageThumb.closest("a")?.getAttribute("href")).toBe("/media/asset-1");
 
-  const videoThumb = screen.getByLabelText("clip.mp4");
+    const videoThumb = screen.getByAltText("clip.mp4");
     expect(videoThumb).toBeTruthy();
-  expect(videoThumb.tagName).toBe("VIDEO");
-  expect(videoThumb.getAttribute("poster")).toBe("/media/asset-2/thumbnail");
-  expect(videoThumb.getAttribute("preload")).toBe("metadata");
-  expect(videoThumb.getAttribute("playsinline")).toBe("");
+    expect(videoThumb.tagName).toBe("IMG");
+    expect(videoThumb.getAttribute("src")).toBe("/media/asset-2/thumbnail");
     expect(screen.getByText("VIDEO")).toBeTruthy();
 
     expect(screen.queryByRole("heading", { name: "mountain-lake.jpg" })).toBeNull();
@@ -114,9 +112,9 @@ describe("MediaListPage", () => {
     Object.defineProperty(imageThumb, "naturalHeight", { configurable: true, value: 900 });
     fireEvent.load(imageThumb);
 
-    Object.defineProperty(videoThumb, "videoWidth", { configurable: true, value: 1920 });
-    Object.defineProperty(videoThumb, "videoHeight", { configurable: true, value: 1080 });
-    fireEvent.loadedMetadata(videoThumb);
+    Object.defineProperty(videoThumb, "naturalWidth", { configurable: true, value: 1920 });
+    Object.defineProperty(videoThumb, "naturalHeight", { configurable: true, value: 1080 });
+    fireEvent.load(videoThumb);
 
     await waitFor(() => {
       expect(imageFigure?.getAttribute("style")).toContain("aspect-ratio: 1.7778");
