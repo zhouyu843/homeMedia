@@ -88,6 +88,10 @@ func (a serviceAdapter) Get(ctx context.Context, id string) (media.Asset, error)
 	return a.service.Get(ctx, id)
 }
 
+func (a serviceAdapter) PlaybackWarning(ctx context.Context, asset media.Asset) *media.PlaybackWarning {
+	return a.service.PlaybackWarning(ctx, asset)
+}
+
 func (a serviceAdapter) Download(ctx context.Context, id string) (media.Asset, io.ReadSeekCloser, error) {
 	return a.service.Download(ctx, id)
 }

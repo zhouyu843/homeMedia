@@ -393,6 +393,7 @@ export function MediaDetailPage({
             <h2>{asset.originalFilename}</h2>
             <p>{formatBytes(asset.sizeBytes)}</p>
             <p>{new Date(asset.createdAt).toLocaleString()}</p>
+            {asset.playbackWarning && <p className="detail-warning">{asset.playbackWarning.message}</p>}
             <div className="detail-actions">
               <a href={asset.downloadUrl} className="primary-link">
                 下载原始文件

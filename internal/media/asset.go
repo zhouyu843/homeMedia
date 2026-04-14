@@ -27,6 +27,11 @@ type Asset struct {
 	DeletedAt        *time.Time
 }
 
+type PlaybackWarning struct {
+	Code    string
+	Message string
+}
+
 type UploadResult struct {
 	Asset            Asset
 	Created          bool

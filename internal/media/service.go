@@ -24,6 +24,7 @@ type Service struct {
 	fileStore  FileStore
 	now        func() time.Time
 	thumbnailGenerator func(ctx context.Context, file io.Reader, mediaType MediaType) (string, []byte, error)
+	videoCodecProbe    func(ctx context.Context, source io.Reader) (string, error)
 }
 
 func NewService(repository Repository, fileStore FileStore) Service {
@@ -32,6 +33,7 @@ func NewService(repository Repository, fileStore FileStore) Service {
 		fileStore:  fileStore,
 		now:        time.Now,
 		thumbnailGenerator: generateThumbnail,
+		videoCodecProbe:    probeVideoCodec,
 	}
 }
 
@@ -152,6 +154,32 @@ func (s Service) Download(ctx context.Context, id string) (Asset, io.ReadSeekClo
 	}
 
 	return s.openAssetFile(asset)
+}
+
+func (s Service) PlaybackWarning(ctx context.Context, asset Asset) *PlaybackWarning {
+	if asset.MediaType != MediaTypeVideo {
+		return nil
+	}
+
+	file, err := s.fileStore.Open(asset.StoragePath)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	codecName, err := s.videoCodecProbe(ctx, file)
+	if err != nil {
+		return nil
+	}
+
+	if !isPotentiallyUnsupportedBrowserCodec(codecName) {
+		return nil
+	}
+
+	return &PlaybackWarning{
+		Code:    "hevc_browser_compatibility",
+		Message: "检测到 HEVC/H.265 视频编码。部分 Linux Chrome 浏览器可能只有声音没有画面；若播放异常，请改用 Firefox、Safari 或下载后本地播放。",
+	}
 }
 
 func (s Service) Delete(ctx context.Context, id string) error {
@@ -603,4 +631,60 @@ func hashReadSeeker(reader io.Reader) (string, error) {
 		return "", fmt.Errorf("hash stored file: %w", err)
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func probeVideoCodec(ctx context.Context, source io.Reader) (string, error) {
+	tempFile, err := os.CreateTemp("", "home-media-video-probe-*")
+	if err != nil {
+		return "", fmt.Errorf("create probe temp file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	defer func() {
+		_ = tempFile.Close()
+		_ = os.Remove(tempPath)
+	}()
+
+	if _, err := io.Copy(tempFile, source); err != nil {
+		return "", fmt.Errorf("buffer video for probe: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return "", fmt.Errorf("close probe temp file: %w", err)
+	}
+
+	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(
+		tctx,
+		"ffprobe",
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=codec_name",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		tempPath,
+	)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if strings.TrimSpace(stderr.String()) != "" {
+			return "", fmt.Errorf("probe video codec: %s", strings.TrimSpace(stderr.String()))
+		}
+		return "", fmt.Errorf("probe video codec: %w", err)
+	}
+
+	codecName := strings.ToLower(strings.TrimSpace(stdout.String()))
+	if codecName == "" {
+		return "", errors.New("probe video codec: empty codec name")
+	}
+
+	return codecName, nil
+}
+
+func isPotentiallyUnsupportedBrowserCodec(codecName string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(codecName))
+	return normalized == "hevc" || normalized == "h265" || normalized == "h.265"
 }

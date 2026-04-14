@@ -208,6 +208,57 @@ func TestServiceUploadRejectsUnsupportedType(t *testing.T) {
 	}
 }
 
+func TestServicePlaybackWarningFlagsHEVCVideo(t *testing.T) {
+	service := NewService(&fakeRepository{}, &fakeFileStore{
+		openFile: readSeekNopCloser{Reader: strings.NewReader("video-bytes")},
+	})
+	service.videoCodecProbe = func(_ context.Context, source io.Reader) (string, error) {
+		payload, err := io.ReadAll(source)
+		if err != nil {
+			return "", err
+		}
+		if string(payload) != "video-bytes" {
+			t.Fatalf("expected probe to receive opened file bytes, got %q", string(payload))
+		}
+		return "hevc", nil
+	}
+
+	warning := service.PlaybackWarning(context.Background(), Asset{
+		ID:          "asset-1",
+		MediaType:   MediaTypeVideo,
+		StoragePath: "20260414/video.mp4",
+	})
+
+	if warning == nil {
+		t.Fatal("expected playback warning for hevc video")
+	}
+	if warning.Code != "hevc_browser_compatibility" {
+		t.Fatalf("expected hevc warning code, got %q", warning.Code)
+	}
+	if !strings.Contains(warning.Message, "HEVC/H.265") {
+		t.Fatalf("expected warning message to mention HEVC/H.265, got %q", warning.Message)
+	}
+}
+
+func TestServicePlaybackWarningSkipsSupportedVideoCodec(t *testing.T) {
+	service := NewService(&fakeRepository{}, &fakeFileStore{
+		openFile: readSeekNopCloser{Reader: strings.NewReader("video-bytes")},
+	})
+	service.videoCodecProbe = func(_ context.Context, _ io.Reader) (string, error) {
+		return "h264", nil
+	}
+
+	warning := service.PlaybackWarning(context.Background(), Asset{
+		ID:          "asset-1",
+		MediaType:   MediaTypeVideo,
+		StoragePath: "20260414/video.mp4",
+	})
+
+	if warning != nil {
+		t.Fatalf("expected no playback warning for supported codec, got %+v", warning)
+	}
+}
+
 func TestServiceUploadCleansUpStoredFileWhenSaveFails(t *testing.T) {
 	repo := &fakeRepository{saveErr: errors.New("db down")}
 	store := &fakeFileStore{

@@ -198,4 +198,43 @@ describe("MediaDetailPage", () => {
     expect(await screen.findByText("PDF 不提供详情页，请返回列表后直接打开原文件。")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "下载原始文件" })).toBeNull();
   });
+
+  it("shows playback warning for hevc video assets", async () => {
+    getMediaMock.mockResolvedValue(
+      makeAsset({
+        id: "asset-video",
+        originalFilename: "clip.mp4",
+        mediaType: "video",
+        mimeType: "video/mp4",
+        viewUrl: "/media/asset-video/view",
+        thumbnailUrl: "/media/asset-video/thumbnail",
+        downloadUrl: "/media/asset-video/download",
+        playbackWarning: {
+          code: "hevc_browser_compatibility",
+          message: "检测到 HEVC/H.265 视频编码。部分 Linux Chrome 浏览器可能只有声音没有画面；若播放异常，请改用 Firefox、Safari 或下载后本地播放。"
+        }
+      })
+    );
+
+    render(
+      React.createElement(
+        MemoryRouter,
+        { initialEntries: ["/media/asset-video"] },
+        React.createElement(
+          Routes,
+          null,
+          React.createElement(Route, {
+            path: "/media/:id",
+            element: React.createElement(MediaDetailPage, {
+              session: { loading: false, status: makeStatus() },
+              onSessionChange: vi.fn()
+            })
+          })
+        )
+      )
+    );
+
+    expect(await screen.findByText(/HEVC\/H\.265/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "下载原始文件" })).toBeTruthy();
+  });
 });

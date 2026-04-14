@@ -483,6 +483,15 @@ p {
   padding: 0.4rem;
 }
 
+.detail-warning {
+  margin: 0.9rem 0 0;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  background: rgba(195, 104, 49, 0.12);
+  color: #8a3e18;
+  line-height: 1.5;
+}
+
 .trash-list {
   display: grid;
   gap: 0.9rem;

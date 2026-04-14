@@ -1,5 +1,10 @@
 export type ApiMediaType = "image" | "video" | "pdf";
 
+export type ApiPlaybackWarning = {
+  code: string;
+  message: string;
+};
+
 export type ApiAsset = {
   id: string;
   originalFilename: string;
@@ -11,6 +16,7 @@ export type ApiAsset = {
   viewUrl: string;
   thumbnailUrl: string;
   downloadUrl: string;
+  playbackWarning?: ApiPlaybackWarning;
 };
 
 export type AuthStatusResponse = {

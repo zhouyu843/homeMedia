@@ -21,6 +21,7 @@ type MediaService interface {
 	List(ctx context.Context) ([]media.Asset, error)
 	ListTrash(ctx context.Context) ([]media.Asset, error)
 	Get(ctx context.Context, id string) (media.Asset, error)
+	PlaybackWarning(ctx context.Context, asset media.Asset) *media.PlaybackWarning
 	Download(ctx context.Context, id string) (media.Asset, io.ReadSeekCloser, error)
 	Thumbnail(ctx context.Context, id string) (string, []byte, error)
 	TrashThumbnail(ctx context.Context, id string) (string, []byte, error)
@@ -189,7 +190,15 @@ func (h Handler) GetMediaJSON(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"asset": toMediaAssetResponse(asset)})
+	response := toMediaAssetResponse(asset)
+	if warning := h.service.PlaybackWarning(c.Request.Context(), asset); warning != nil {
+		response.PlaybackWarning = &playbackWarningResponse{
+			Code:    warning.Code,
+			Message: warning.Message,
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"asset": response})
 }
 
 func (h Handler) ShowMedia(c *gin.Context) {
@@ -478,6 +487,12 @@ type mediaAssetResponse struct {
 	ViewURL          string `json:"viewUrl"`
 	ThumbnailURL     string `json:"thumbnailUrl"`
 	DownloadURL      string `json:"downloadUrl"`
+	PlaybackWarning  *playbackWarningResponse `json:"playbackWarning,omitempty"`
+}
+
+type playbackWarningResponse struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 func toMediaAssetResponse(asset media.Asset) mediaAssetResponse {
