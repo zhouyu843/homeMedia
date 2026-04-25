@@ -244,7 +244,7 @@ docker compose down
 
 端口约定：
 - 本地开发对外固定使用 `8018` 访问应用。
-- 本地开发对外固定使用 `5441` 访问 PostgreSQL，容器内也监听 `5441`。
+- 本地开发对外固定使用 `51731` 访问 PostgreSQL，容器内也监听 `51731`。
 
 ## 环境变量
 
@@ -289,8 +289,8 @@ docker compose down
 - 运行时容器不再挂载源码，也不再使用 `go run`。
 - 上传文件仍保存在宿主机 `./data/uploads/`，数据库数据保存在 Docker volume `postgres_data`。
 - 开发环境对外固定使用 `8018`，生产环境对外固定使用 `8118`。
-- 开发环境对外固定使用 `5441` 访问 PostgreSQL。
-- 生产环境 PostgreSQL 仅在 Compose 内部网络监听 `5442`，不再映射宿主机端口；`app` 和 `migrate` 通过 `postgres:5442` 访问数据库。
+- 开发环境对外固定使用 `51731` 访问 PostgreSQL。
+- 生产环境 PostgreSQL 仅在 Compose 内部网络监听 `51731`，不再映射宿主机端口；`app` 和 `migrate` 通过 `postgres:51731` 访问数据库。
 - 生产默认端口为 `8118`，对外访问地址示例：`http://127.0.0.1:8118/login`。
 
 部署步骤：

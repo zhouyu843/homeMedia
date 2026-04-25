@@ -2,17 +2,17 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: homemedia-postgres
-    command: ["postgres", "-p", "5441"]
+    command: ["postgres", "-p", "51731"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5441:5441"
+      - "51731:51731"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -p 5441 -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -p 51731 -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
