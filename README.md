@@ -115,9 +115,52 @@ JSON API：
 - `web/frontend`：React + TypeScript 前端工程
 - `web/static`：Gin 托管的静态资源与前端构建产物
 - `web/static/app`：Vite SPA 构建输出目录
+- `e2e`：Playwright E2E 测试工程
 
 运行依赖补充：
 - 缩略图依赖 `ffmpeg` 处理图片/视频，并默认持久化到本地存储。
+
+## E2E 测试
+
+E2E 测试使用 Playwright，测试代码在独立的 `e2e/` 目录，通过 Docker Compose `e2e` service 运行（基于官方 Playwright 镜像），不影响日常开发启动。
+
+### 覆盖场景
+
+- 登录 / 登出 / 未登录重定向
+- 文件上传（含去重）
+- 媒体列表加载
+- 媒体详情页
+- 删除 / 回收站 / 恢复 / 彻底删除
+
+### 运行方式
+
+先确保开发栈已启动：
+
+```bash
+docker compose up -d
+```
+
+再运行 E2E 测试（Makefile 快捷方式）：
+
+```bash
+make e2e
+```
+
+等价命令：
+
+```bash
+docker compose --profile e2e run --rm e2e
+```
+
+### 配置说明
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `BASE_URL` | `http://app:8080` | 测试目标地址（容器内 app service） |
+| `ADMIN_USERNAME` | 读自 `.env` | 管理员用户名 |
+| `ADMIN_PASSWORD` | 读自 `.env` | 管理员密码 |
+
+Playwright 报告会生成到 `e2e/playwright-report/`（已加入 `.gitignore`）。
 - PDF 首页缩略图依赖 `pdftoppm`（`poppler-utils`）。
 
 ## 快速开始

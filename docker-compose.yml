@@ -54,5 +54,20 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.51.1-noble
+    working_dir: /e2e
+    volumes:
+      - ./e2e:/e2e
+    environment:
+      BASE_URL: http://app:8080
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    depends_on:
+      app:
+        condition: service_started
+    profiles: [e2e]
+    command: sh -c "npm ci && npx playwright test"
+
 volumes:
   postgres_data:

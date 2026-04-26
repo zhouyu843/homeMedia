@@ -27,3 +27,7 @@ frontend-test:
 
 backfill-video-thumbnails:
 	docker compose run --rm app go run ./cmd/backfill-thumbnails -media-types=video
+
+.PHONY: e2e
+e2e:
+	docker compose --profile e2e run --rm e2e
