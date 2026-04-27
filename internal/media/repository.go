@@ -15,6 +15,8 @@ type Repository interface {
 	FindWithoutContentHashBySize(ctx context.Context, sizeBytes int64) ([]Asset, error)
 	UpdateContentHash(ctx context.Context, id string, contentHash string) error
 	UpdateThumbnailStoragePath(ctx context.Context, id string, thumbnailStoragePath string) error
+	UpdatePreviewStoragePath(ctx context.Context, id string, previewStoragePath string) error
+	ListWithoutPreview(ctx context.Context) ([]Asset, error)
 	ListRecent(ctx context.Context) ([]Asset, error)
 	ListTrash(ctx context.Context) ([]Asset, error)
 	SoftDelete(ctx context.Context, id string, deletedAt time.Time) error
@@ -26,6 +28,7 @@ type Repository interface {
 type FileStore interface {
 	Save(ctx context.Context, originalFilename string, source io.Reader) (StoredFile, error)
 	SaveThumbnail(ctx context.Context, assetID string, source io.Reader) (StoredFile, error)
+	SavePreview(ctx context.Context, assetID string, ext string, source io.Reader) (StoredFile, error)
 	Open(storagePath string) (io.ReadSeekCloser, error)
 	Delete(storagePath string) error
 }

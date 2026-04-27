@@ -744,6 +744,31 @@ func (m *memoryRepository) UpdateThumbnailStoragePath(_ context.Context, id stri
   return media.ErrNotFound
 }
 
+func (m *memoryRepository) UpdatePreviewStoragePath(_ context.Context, id string, previewStoragePath string) error {
+  m.mu.Lock()
+  defer m.mu.Unlock()
+  for index, asset := range m.assets {
+    if asset.ID == id {
+      asset.PreviewStoragePath = previewStoragePath
+      m.assets[index] = asset
+      return nil
+    }
+  }
+  return media.ErrNotFound
+}
+
+func (m *memoryRepository) ListWithoutPreview(_ context.Context) ([]media.Asset, error) {
+  m.mu.Lock()
+  defer m.mu.Unlock()
+  var assets []media.Asset
+  for _, asset := range m.assets {
+    if asset.PreviewStoragePath == "" && asset.DeletedAt == nil {
+      assets = append(assets, asset)
+    }
+  }
+  return assets, nil
+}
+
 func (m *memoryRepository) ListRecent(_ context.Context) ([]media.Asset, error) {
   m.mu.Lock()
   defer m.mu.Unlock()
@@ -830,6 +855,10 @@ func (brokenStore) Save(_ context.Context, _ string, _ io.Reader) (media.StoredF
 }
 
 func (brokenStore) SaveThumbnail(_ context.Context, _ string, _ io.Reader) (media.StoredFile, error) {
+  return media.StoredFile{}, nil
+}
+
+func (brokenStore) SavePreview(_ context.Context, _ string, _ string, _ io.Reader) (media.StoredFile, error) {
   return media.StoredFile{}, nil
 }
 

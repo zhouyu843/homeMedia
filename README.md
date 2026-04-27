@@ -11,7 +11,8 @@
 - 图片、视频和 PDF 上传
 - 列表页整页拖拽上传
 - 缩略图优先的相册式媒体总览，按原始横竖比例同高展示，单张宽度不超过容器半宽；视频卡片在列表页显示静态首帧缩略图；PDF 使用第一页真实缩略图
-- 图片和视频保留详情页预览；PDF 在列表页中直接新窗口打开原文件视图
+- 上传时自动生成压缩预览：图片压缩为 1280px 宽 JPEG，视频压缩为 720p H.264 MP4
+- 详情页默认展示压缩预览，提供「查看原始图片/视频」按钮可在新标签打开原始文件，也可直接下载原始文件
 - 视频详情页会在检测到 HEVC/H.265 编码时显示兼容性提示，便于排查 Linux Chrome 只有声音没有画面的场景
 - 原始文件下载
 - 逻辑删除、恢复、彻底删除、清空回收站
@@ -34,7 +35,7 @@
 
 职责分界：
 - React 负责页面渲染、路由切换、上传交互、列表与详情展示。
-- Go 负责 Cookie Session、CSRF、限流、媒体领域逻辑、JSON API、预览/下载/缩略图文件流、上传时优先生成并持久化缩略图、前端静态资源托管。
+- Go 负责 Cookie Session、CSRF、限流、媒体领域逻辑、JSON API、预览/下载/缩略图文件流、上传时同步生成并持久化压缩预览与缩略图、前端静态资源托管。
 - PostgreSQL 只保存元数据；原始文件固定保存在挂载目录。
 
 ## 路由说明
@@ -47,15 +48,16 @@ SPA 页面路由：
 
 这些路由中，`/login`、`/media`、`/trash` 与图片/视频的 `/media/:id` 都返回前端 SPA 入口文件，由 React Router 接管页面渲染。PDF 不再提供 `/media/:id` 详情页。
 
-文件流与缩略图路由：
-- `GET /media/:id/view`
+文件流、预览与缩略图路由：
+- `GET /media/:id/view`（原始文件）
+- `GET /media/:id/preview`（压缩预览；无预览时 302 跳转到 `/view`）
 - `GET /media/:id/download`
 - `GET /media/:id/thumbnail`
 - `GET /trash/:id/thumbnail`
 
 说明：
-- 图片和视频继续使用现有文件流预览。
-- PDF 在媒体列表中直接以新窗口打开 `GET /media/:id/view`。
+- 上传时同步生成压缩预览（图片：1280px JPEG；视频：720p H.264 MP4）并持久化保存，PDF 跳过压缩预览。
+- 详情页默认加载 `/preview`，「查看原始」按钮指向 `/view`（新标签）。
 - 缩略图统一输出 JPEG，并在上传时优先持久化保存；历史资源或生成失败的场景会在首次请求时按需生成并懒回填。
 - PDF 缩略图由服务端提取第一页；提取失败时自动回退为占位图。
 
@@ -106,6 +108,7 @@ JSON API：
 ## 目录说明
 
 - `cmd/server`：应用入口
+- `cmd/backfill-previews`：历史媒体压缩预览批量生成命令
 - `internal/config`：环境变量配置
 - `internal/http`：Gin 路由、认证、API handler
 - `internal/media`：媒体领域模型与业务服务
@@ -118,7 +121,18 @@ JSON API：
 - `e2e`：Playwright E2E 测试工程
 
 运行依赖补充：
-- 缩略图依赖 `ffmpeg` 处理图片/视频，并默认持久化到本地存储。
+- 缩略图与压缩预览均依赖 `ffmpeg` 处理图片/视频，并默认持久化到本地存储。
+- PDF 首页缩略图依赖 `pdftoppm`（`poppler-utils`）。
+
+## 历史数据压缩预览回填
+
+已有文件默认没有压缩预览，可通过以下命令批量生成：
+
+```bash
+make backfill-previews
+```
+
+该命令会遍历所有尚无 `preview_storage_path` 的活跃媒体记录（PDF 跳过），依次调用 ffmpeg 生成并保存压缩预览，期间会打印进度和最终统计。视频文件较大时耗时较长，建议在低峰时段运行。
 
 ## E2E 测试
 
@@ -161,7 +175,6 @@ docker compose --profile e2e run --rm e2e
 | `ADMIN_PASSWORD` | 读自 `.env` | 管理员密码 |
 
 Playwright 报告会生成到 `e2e/playwright-report/`（已加入 `.gitignore`）。
-- PDF 首页缩略图依赖 `pdftoppm`（`poppler-utils`）。
 
 ## 快速开始
 

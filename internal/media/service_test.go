@@ -761,6 +761,18 @@ func (f *fakeRepository) UpdateThumbnailStoragePath(_ context.Context, id string
 	return nil
 }
 
+func (f *fakeRepository) UpdatePreviewStoragePath(_ context.Context, id string, previewStoragePath string) error {
+	if asset, ok := f.assetByID[id]; ok {
+		asset.PreviewStoragePath = previewStoragePath
+		f.assetByID[id] = asset
+	}
+	return nil
+}
+
+func (f *fakeRepository) ListWithoutPreview(_ context.Context) ([]Asset, error) {
+	return nil, nil
+}
+
 func (f *fakeRepository) ListRecent(_ context.Context) ([]Asset, error) {
 	return f.listAssets, nil
 }
@@ -869,6 +881,10 @@ func (f *fakeFileStore) SaveThumbnail(_ context.Context, assetID string, _ io.Re
 	return f.thumbnailFile, nil
 }
 
+func (f *fakeFileStore) SavePreview(_ context.Context, _ string, _ string, _ io.Reader) (StoredFile, error) {
+	return StoredFile{}, nil
+}
+
 func (f *fakeFileStore) Open(_ string) (io.ReadSeekCloser, error) {
 	if f.openErr != nil {
 		return nil, f.openErr
@@ -921,6 +937,14 @@ func (d *duplicateOnSaveRepository) UpdateContentHash(_ context.Context, _ strin
 
 func (d *duplicateOnSaveRepository) UpdateThumbnailStoragePath(_ context.Context, _ string, _ string) error {
 	return nil
+}
+
+func (d *duplicateOnSaveRepository) UpdatePreviewStoragePath(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
+func (d *duplicateOnSaveRepository) ListWithoutPreview(_ context.Context) ([]Asset, error) {
+	return nil, nil
 }
 
 func (d *duplicateOnSaveRepository) ListRecent(_ context.Context) ([]Asset, error) {

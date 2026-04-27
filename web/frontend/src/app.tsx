@@ -383,9 +383,9 @@ export function MediaDetailPage({
         <section className="detail-panel">
           <div className="detail-preview">
             {asset.mediaType === "image" ? (
-              <img src={asset.viewUrl} alt={asset.originalFilename} className="detail-image" />
+              <img src={asset.previewUrl} alt={asset.originalFilename} className="detail-image" />
             ) : (
-              <video src={asset.viewUrl} controls className="detail-video" />
+              <video src={asset.previewUrl} controls className="detail-video" />
             )}
           </div>
           <div className="detail-meta">
@@ -395,6 +395,9 @@ export function MediaDetailPage({
             <p>{new Date(asset.createdAt).toLocaleString()}</p>
             {asset.playbackWarning && <p className="detail-warning">{asset.playbackWarning.message}</p>}
             <div className="detail-actions">
+              <a href={asset.viewUrl} className="secondary-link" target="_blank" rel="noreferrer noopener">
+                查看原始{asset.mediaType === "image" ? "图片" : "视频"}
+              </a>
               <a href={asset.downloadUrl} className="primary-link">
                 下载原始文件
               </a>

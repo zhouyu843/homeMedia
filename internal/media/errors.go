@@ -9,4 +9,6 @@ var (
 	ErrInvalidStoragePath   = errors.New("invalid storage path")
 	ErrDuplicateContentHash = errors.New("media asset with same content already exists")
 	ErrThumbnailGeneration  = errors.New("thumbnail generation failed")
+	ErrPreviewNotAvailable  = errors.New("preview not available")
+	ErrPreviewGeneration    = errors.New("preview generation failed")
 )

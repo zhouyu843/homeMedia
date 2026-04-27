@@ -37,6 +37,7 @@ function makeAsset(overrides?: Partial<ApiAsset>): ApiAsset {
     sizeBytes: 512,
     createdAt: "2026-04-06T10:00:00Z",
     viewUrl: "/media/asset-1/view",
+    previewUrl: "/media/asset-1/preview",
     thumbnailUrl: "/media/asset-1/thumbnail",
     downloadUrl: "/media/asset-1/download",
     ...overrides

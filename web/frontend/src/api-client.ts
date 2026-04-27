@@ -14,6 +14,7 @@ export type ApiAsset = {
   createdAt: string;
   deletedAt?: string;
   viewUrl: string;
+  previewUrl: string;
   thumbnailUrl: string;
   downloadUrl: string;
   playbackWarning?: ApiPlaybackWarning;

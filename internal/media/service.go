@@ -97,6 +97,7 @@ func (s Service) Upload(ctx context.Context, input UploadInput) (UploadResult, e
 	}
 
 	thumbnailStoragePath, thumbnailErr := s.storeThumbnailFromTempFile(ctx, assetID, tempFile, mediaType)
+	previewStoragePath, _ := s.storePreviewFromTempFile(ctx, assetID, tempFile, mediaType)
 
 	asset := Asset{
 		ID:               assetID,
@@ -108,6 +109,7 @@ func (s Service) Upload(ctx context.Context, input UploadInput) (UploadResult, e
 		ContentHash:      contentHash,
 		StoragePath:      storedFile.StoragePath,
 		ThumbnailStoragePath: thumbnailStoragePath,
+		PreviewStoragePath:   previewStoragePath,
 		CreatedAt:        s.now().UTC(),
 	}
 
@@ -116,6 +118,9 @@ func (s Service) Upload(ctx context.Context, input UploadInput) (UploadResult, e
 		_ = s.fileStore.Delete(storedFile.StoragePath)
 		if thumbnailStoragePath != "" {
 			_ = s.fileStore.Delete(thumbnailStoragePath)
+		}
+		if previewStoragePath != "" {
+			_ = s.fileStore.Delete(previewStoragePath)
 		}
 		if errors.Is(err, ErrDuplicateContentHash) {
 			existingAsset, findErr := s.repository.FindByContentHash(ctx, contentHash)
@@ -216,6 +221,12 @@ func (s Service) DeletePermanently(ctx context.Context, id string) error {
 
 	if asset.ThumbnailStoragePath != "" {
 		if err := s.fileStore.Delete(asset.ThumbnailStoragePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+
+	if asset.PreviewStoragePath != "" {
+		if err := s.fileStore.Delete(asset.PreviewStoragePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
@@ -352,6 +363,209 @@ func (s Service) persistThumbnail(ctx context.Context, assetID string, thumbnail
 	}
 
 	return storedThumbnail.StoragePath, nil
+}
+
+// Preview opens the compressed preview file for the given asset.
+// Returns ErrPreviewNotAvailable if no preview has been generated yet.
+func (s Service) Preview(ctx context.Context, id string) (contentType string, file io.ReadSeekCloser, createdAt time.Time, err error) {
+	asset, findErr := s.repository.FindByID(ctx, id)
+	if findErr != nil {
+		return "", nil, time.Time{}, findErr
+	}
+
+	if asset.PreviewStoragePath == "" {
+		return "", nil, time.Time{}, ErrPreviewNotAvailable
+	}
+
+	f, openErr := s.fileStore.Open(asset.PreviewStoragePath)
+	if openErr != nil {
+		return "", nil, time.Time{}, ErrPreviewNotAvailable
+	}
+
+	ct := previewContentType(asset.MediaType)
+	return ct, f, asset.CreatedAt, nil
+}
+
+func previewContentType(mediaType MediaType) string {
+	if mediaType == MediaTypeVideo {
+		return "video/mp4"
+	}
+	return "image/jpeg"
+}
+
+func previewExtension(mediaType MediaType) string {
+	if mediaType == MediaTypeVideo {
+		return ".mp4"
+	}
+	return ".jpg"
+}
+
+func generatePreview(ctx context.Context, inputPath string, mediaType MediaType) ([]byte, error) {
+	if mediaType == MediaTypeImage {
+		return generateImagePreview(ctx, inputPath)
+	}
+	if mediaType == MediaTypeVideo {
+		return generateVideoPreview(ctx, inputPath)
+	}
+	return nil, ErrPreviewGeneration
+}
+
+func generateImagePreview(ctx context.Context, inputPath string) ([]byte, error) {
+	tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(
+		tctx,
+		"ffmpeg",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", inputPath,
+		"-vf", "scale=1280:-1",
+		"-frames:v", "1",
+		"-f", "image2pipe",
+		"-vcodec", "mjpeg",
+		"-q:v", "2",
+		"pipe:1",
+	)
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+
+	if err := cmd.Run(); err != nil {
+		if strings.TrimSpace(errOut.String()) != "" {
+			return nil, fmt.Errorf("%w: %s", ErrPreviewGeneration, strings.TrimSpace(errOut.String()))
+		}
+		return nil, fmt.Errorf("%w: %v", ErrPreviewGeneration, err)
+	}
+
+	if out.Len() == 0 {
+		return nil, ErrPreviewGeneration
+	}
+
+	return out.Bytes(), nil
+}
+
+func generateVideoPreview(ctx context.Context, inputPath string) ([]byte, error) {
+	tctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	outputFile, err := os.CreateTemp("", "home-media-preview-*.mp4")
+	if err != nil {
+		return nil, fmt.Errorf("%w: create preview temp file: %v", ErrPreviewGeneration, err)
+	}
+	outputPath := outputFile.Name()
+	_ = outputFile.Close()
+	defer func() { _ = os.Remove(outputPath) }()
+
+	cmd := exec.CommandContext(
+		tctx,
+		"ffmpeg",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", inputPath,
+		"-vf", "scale=-2:720",
+		"-c:v", "libx264",
+		"-preset", "fast",
+		"-crf", "23",
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-movflags", "+faststart",
+		"-y",
+		outputPath,
+	)
+
+	var errOut bytes.Buffer
+	cmd.Stderr = &errOut
+
+	if err := cmd.Run(); err != nil {
+		if strings.TrimSpace(errOut.String()) != "" {
+			return nil, fmt.Errorf("%w: %s", ErrPreviewGeneration, strings.TrimSpace(errOut.String()))
+		}
+		return nil, fmt.Errorf("%w: %v", ErrPreviewGeneration, err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read preview file: %v", ErrPreviewGeneration, err)
+	}
+	if len(data) == 0 {
+		return nil, ErrPreviewGeneration
+	}
+
+	return data, nil
+}
+
+func (s Service) storePreviewFromTempFile(ctx context.Context, assetID string, tempFile *os.File, mediaType MediaType) (string, error) {
+	if mediaType == MediaTypePDF {
+		return "", ErrPreviewGeneration
+	}
+
+	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rewind upload temp file for preview: %w", err)
+	}
+
+	inputPath, cleanup, err := writeThumbnailTempFile(tempFile, "home-media-preview-src-*")
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+
+	data, err := generatePreview(ctx, inputPath, mediaType)
+	if err != nil {
+		return "", err
+	}
+
+	ext := previewExtension(mediaType)
+	stored, err := s.fileStore.SavePreview(ctx, assetID, ext, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+
+	return stored.StoragePath, nil
+}
+
+func (s Service) ListWithoutPreview(ctx context.Context) ([]Asset, error) {
+	return s.repository.ListWithoutPreview(ctx)
+}
+
+// BackfillPreview generates and persists a preview for an existing asset.
+// It reads the original file from storage to generate the preview.
+func (s Service) BackfillPreview(ctx context.Context, id string) error {
+	asset, err := s.repository.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if asset.MediaType == MediaTypePDF {
+		return ErrPreviewGeneration
+	}
+
+	_, originalFile, err := s.openAssetFile(asset)
+	if err != nil {
+		return err
+	}
+	defer originalFile.Close()
+
+	inputPath, cleanup, err := writeThumbnailTempFile(originalFile, "home-media-preview-backfill-*")
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	data, err := generatePreview(ctx, inputPath, asset.MediaType)
+	if err != nil {
+		return err
+	}
+
+	ext := previewExtension(asset.MediaType)
+	stored, err := s.fileStore.SavePreview(ctx, asset.ID, ext, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+
+	return s.repository.UpdatePreviewStoragePath(ctx, asset.ID, stored.StoragePath)
 }
 
 func mediaTypeFromMIME(mimeType string) (MediaType, error) {

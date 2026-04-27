@@ -38,6 +38,7 @@ func NewRouter(handler Handler) *gin.Engine {
 	protected.GET("/api/media/:id", handler.GetMediaJSON)
 	protected.GET("/media/:id", handler.ShowMedia)
 	protected.GET("/media/:id/view", handler.ViewMedia)
+	protected.GET("/media/:id/preview", handler.PreviewMedia)
 	protected.GET("/media/:id/thumbnail", handler.ThumbnailMedia)
 	protected.GET("/media/:id/download", handler.DownloadMedia)
 	protected.POST("/api/media/:id/delete", handler.DeleteMediaJSON)

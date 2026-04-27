@@ -43,6 +43,10 @@ func (s Store) SaveThumbnail(_ context.Context, assetID string, source io.Reader
 	return s.saveFile("thumbnails", assetID+".jpg", source)
 }
 
+func (s Store) SavePreview(_ context.Context, assetID string, ext string, source io.Reader) (media.StoredFile, error) {
+	return s.saveFile("previews", assetID+ext, source)
+}
+
 func (s Store) saveFile(directoryPrefix string, filename string, source io.Reader) (media.StoredFile, error) {
 	fileName := filename
 	if directoryPrefix == "" {

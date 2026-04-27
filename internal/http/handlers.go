@@ -23,6 +23,7 @@ type MediaService interface {
 	Get(ctx context.Context, id string) (media.Asset, error)
 	PlaybackWarning(ctx context.Context, asset media.Asset) *media.PlaybackWarning
 	Download(ctx context.Context, id string) (media.Asset, io.ReadSeekCloser, error)
+	Preview(ctx context.Context, id string) (contentType string, file io.ReadSeekCloser, createdAt time.Time, err error)
 	Thumbnail(ctx context.Context, id string) (string, []byte, error)
 	TrashThumbnail(ctx context.Context, id string) (string, []byte, error)
 	Delete(ctx context.Context, id string) error
@@ -343,6 +344,25 @@ func (h Handler) ViewMedia(c *gin.Context) {
 	http.ServeContent(c.Writer, c.Request, asset.OriginalFilename, asset.CreatedAt, file)
 }
 
+func (h Handler) PreviewMedia(c *gin.Context) {
+	id := c.Param("id")
+	contentType, file, createdAt, err := h.service.Preview(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, media.ErrPreviewNotAvailable) || errors.Is(err, media.ErrFileMissing) {
+			c.Redirect(http.StatusFound, "/media/"+id+"/view")
+			return
+		}
+		h.writeMediaError(c, err)
+		return
+	}
+	defer file.Close()
+
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", "inline")
+	c.Header("Cache-Control", "private, max-age=3600")
+	http.ServeContent(c.Writer, c.Request, id, createdAt, file)
+}
+
 func (h Handler) ThumbnailMedia(c *gin.Context) {
 	contentType, thumbnail, err := h.service.Thumbnail(c.Request.Context(), c.Param("id"))
 	h.respondThumbnail(c, contentType, thumbnail, err)
@@ -485,6 +505,7 @@ type mediaAssetResponse struct {
 	CreatedAt        string `json:"createdAt"`
 	DeletedAt        string `json:"deletedAt,omitempty"`
 	ViewURL          string `json:"viewUrl"`
+	PreviewURL       string `json:"previewUrl"`
 	ThumbnailURL     string `json:"thumbnailUrl"`
 	DownloadURL      string `json:"downloadUrl"`
 	PlaybackWarning  *playbackWarningResponse `json:"playbackWarning,omitempty"`
@@ -505,6 +526,7 @@ func toMediaAssetResponse(asset media.Asset) mediaAssetResponse {
 		SizeBytes:        asset.SizeBytes,
 		CreatedAt:        asset.CreatedAt.UTC().Format(time.RFC3339),
 		ViewURL:          basePath + "/view",
+		PreviewURL:       basePath + "/preview",
 		ThumbnailURL:     basePath + "/thumbnail",
 		DownloadURL:      basePath + "/download",
 	}

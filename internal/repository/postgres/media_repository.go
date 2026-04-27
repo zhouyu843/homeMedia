@@ -32,8 +32,9 @@ func (r MediaRepository) Save(ctx context.Context, asset media.Asset) (media.Ass
 			content_hash,
 			storage_path,
 			thumbnail_storage_path,
+			preview_storage_path,
 			created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
 
 	_, err := r.db.ExecContext(
@@ -48,6 +49,7 @@ func (r MediaRepository) Save(ctx context.Context, asset media.Asset) (media.Ass
 		asset.ContentHash,
 		asset.StoragePath,
 		asset.ThumbnailStoragePath,
+		asset.PreviewStoragePath,
 		asset.CreatedAt,
 	)
 	if err != nil {
@@ -63,7 +65,7 @@ func (r MediaRepository) Save(ctx context.Context, asset media.Asset) (media.Ass
 
 func (r MediaRepository) FindByID(ctx context.Context, id string) (media.Asset, error) {
 	query := `
-		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), created_at, deleted_at
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), COALESCE(preview_storage_path, ''), created_at, deleted_at
 		FROM media_assets
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -81,7 +83,7 @@ func (r MediaRepository) FindByID(ctx context.Context, id string) (media.Asset, 
 
 func (r MediaRepository) FindDeletedByID(ctx context.Context, id string) (media.Asset, error) {
 	query := `
-		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), created_at, deleted_at
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), COALESCE(preview_storage_path, ''), created_at, deleted_at
 		FROM media_assets
 		WHERE id = $1 AND deleted_at IS NOT NULL
 	`
@@ -99,7 +101,7 @@ func (r MediaRepository) FindDeletedByID(ctx context.Context, id string) (media.
 
 func (r MediaRepository) FindByContentHash(ctx context.Context, contentHash string) (media.Asset, error) {
 	query := `
-		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), created_at, deleted_at
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), COALESCE(preview_storage_path, ''), created_at, deleted_at
 		FROM media_assets
 		WHERE content_hash = $1 AND deleted_at IS NULL
 	`
@@ -117,7 +119,7 @@ func (r MediaRepository) FindByContentHash(ctx context.Context, contentHash stri
 
 func (r MediaRepository) FindDeletedByContentHash(ctx context.Context, contentHash string) (media.Asset, error) {
 	query := `
-		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), created_at, deleted_at
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), COALESCE(preview_storage_path, ''), created_at, deleted_at
 		FROM media_assets
 		WHERE content_hash = $1 AND deleted_at IS NOT NULL
 		ORDER BY deleted_at DESC
@@ -137,7 +139,7 @@ func (r MediaRepository) FindDeletedByContentHash(ctx context.Context, contentHa
 
 func (r MediaRepository) FindWithoutContentHashBySize(ctx context.Context, sizeBytes int64) ([]media.Asset, error) {
 	query := `
-		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), created_at, deleted_at
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), COALESCE(preview_storage_path, ''), created_at, deleted_at
 		FROM media_assets
 		WHERE size_bytes = $1 AND content_hash IS NULL AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -207,9 +209,62 @@ func (r MediaRepository) UpdateThumbnailStoragePath(ctx context.Context, id stri
 	return nil
 }
 
+func (r MediaRepository) UpdatePreviewStoragePath(ctx context.Context, id string, previewStoragePath string) error {
+	query := `
+		UPDATE media_assets
+		SET preview_storage_path = $2
+		WHERE id = $1
+	`
+
+	result, err := r.db.ExecContext(ctx, query, id, previewStoragePath)
+	if err != nil {
+		return fmt.Errorf("update media asset preview storage path: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update media asset preview storage path rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return media.ErrNotFound
+	}
+
+	return nil
+}
+
+func (r MediaRepository) ListWithoutPreview(ctx context.Context) ([]media.Asset, error) {
+	query := `
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), COALESCE(preview_storage_path, ''), created_at, deleted_at
+		FROM media_assets
+		WHERE preview_storage_path IS NULL AND deleted_at IS NULL
+		ORDER BY created_at DESC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("list media assets without preview: %w", err)
+	}
+	defer rows.Close()
+
+	var assets []media.Asset
+	for rows.Next() {
+		var asset media.Asset
+		if err := scanAssetRow(rows, &asset); err != nil {
+			return nil, fmt.Errorf("scan media asset without preview: %w", err)
+		}
+		assets = append(assets, asset)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate media assets without preview: %w", err)
+	}
+
+	return assets, nil
+}
+
 func (r MediaRepository) ListRecent(ctx context.Context) ([]media.Asset, error) {
 	query := `
-		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), created_at, deleted_at
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), COALESCE(preview_storage_path, ''), created_at, deleted_at
 		FROM media_assets
 		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -239,7 +294,7 @@ func (r MediaRepository) ListRecent(ctx context.Context) ([]media.Asset, error) 
 
 func (r MediaRepository) ListTrash(ctx context.Context) ([]media.Asset, error) {
 	query := `
-		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), created_at, deleted_at
+		SELECT id, original_filename, stored_filename, media_type, mime_type, size_bytes, COALESCE(content_hash, ''), storage_path, COALESCE(thumbnail_storage_path, ''), COALESCE(preview_storage_path, ''), created_at, deleted_at
 		FROM media_assets
 		WHERE deleted_at IS NOT NULL
 		ORDER BY deleted_at DESC, created_at DESC
@@ -371,6 +426,7 @@ func scanAssetRow(scanner assetScanner, asset *media.Asset) error {
 		&asset.ContentHash,
 		&asset.StoragePath,
 		&asset.ThumbnailStoragePath,
+		&asset.PreviewStoragePath,
 		&asset.CreatedAt,
 		&deletedAt,
 	)
